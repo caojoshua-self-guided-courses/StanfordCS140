@@ -90,7 +90,7 @@ struct thread
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
 
-    /* Shared between thread.c and synch.c. */
+    /* Shared between thread.c, timer.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
 #ifdef USERPROG
@@ -98,10 +98,11 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
 #endif
 
+    /* Owned by timer.c */
+    int64_t next_wakeup;                /* Schedule wakeup for sleeping thread */
+
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
-
-    int64_t next_wakeup;                /* Schedule wakeup for sleeping thread */
   };
 
 /* If false (default), use round-robin scheduler.
@@ -139,5 +140,7 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+struct thread *list_pop_highest_priority(struct list *);
 
 #endif /* threads/thread.h */

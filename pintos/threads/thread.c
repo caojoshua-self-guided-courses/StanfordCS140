@@ -247,6 +247,17 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
+
+  /* yield the running thread if the unblocked thread has 
+   * greater priority */
+  if (t->priority > thread_current ()->priority) {
+    if (intr_context ()) {
+      intr_yield_on_return();
+    }
+    else { 
+      thread_yield ();
+    }
+  }
   intr_set_level (old_level);
 }
 
@@ -496,7 +507,7 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+    return list_pop_highest_priority (&ready_list);
 }
 
 /* Completes a thread switch by activating the new thread's page
@@ -585,3 +596,20 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+/* Pops and returns the highest priority thread in the list
+ * with list_elem elem (ready_list or semaphore waiters) */
+struct thread *list_pop_highest_priority(struct list *l) {
+  struct list_elem *e = list_begin(l);
+  struct thread *highest_priority_thread = 
+    list_entry(e, struct thread, elem);
+  for (e = list_next(e); e != list_end(l); e = list_next(e))
+  {
+    struct thread *t = list_entry(e, struct thread, elem);
+    if (t->priority > highest_priority_thread->priority)
+      highest_priority_thread = t;
+  }
+  list_remove(&(highest_priority_thread->elem));
+  return highest_priority_thread;
+
+}
