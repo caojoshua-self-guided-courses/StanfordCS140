@@ -70,6 +70,7 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+static int given_thread_get_priority (struct thread *t);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -235,7 +236,10 @@ thread_block (void)
    This function does not preempt the running thread.  This can
    be important: if the caller had disabled interrupts itself,
    it may expect that it can atomically unblock a thread and
-   update other data. */
+   update other data. 
+
+  Update: this function does preempt the thread...Should I move
+  it elsewhere? */
 void
 thread_unblock (struct thread *t) 
 {
@@ -250,7 +254,7 @@ thread_unblock (struct thread *t)
 
   /* yield the running thread if the unblocked thread has 
    * greater priority */
-  if (t->priority > thread_current ()->priority) {
+  if (given_thread_get_priority(t) > thread_get_priority()) {
     if (intr_context ()) {
       intr_yield_on_return();
     }
@@ -350,18 +354,66 @@ thread_foreach (thread_action_func *func, void *aux)
     }
 }
 
-/* Sets the current thread's priority to NEW_PRIORITY. */
+/* Sets the current thread's priority to NEW_PRIORITY.
+ * Yields if the priority is lower than a ready thread's priority. */
 void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  if (!list_empty (&ready_list) &&
+      new_priority < list_highest_priority_thread (&ready_list)->priority)
+  {
+    if (intr_context ()) {
+      intr_yield_on_return();
+    }
+    else { 
+      thread_yield ();
+    }
+  }
+}
+
+const unsigned int MAX_DEPTH = 8;
+
+/* Recursive helper function used by thread_get_priority. Adds
+ * the priorities down the priority donate chain */
+static int
+thread_get_donated_priority (struct thread *t, unsigned int depth)
+{ 
+  int priority = t->priority;
+  if (depth == MAX_DEPTH)
+    return priority;
+
+  struct list_elem *lock_elem;
+  for (lock_elem = list_begin (&t->locks); lock_elem != list_end (&t->locks);
+      lock_elem = list_next (lock_elem))
+  {
+    struct lock *lock = list_entry (lock_elem, struct lock, elem);
+    struct list *waiters = &lock->semaphore.waiters;
+    struct list_elem *thread_elem;
+    for (thread_elem = list_begin (waiters); thread_elem != list_end (waiters);
+        thread_elem = list_next (thread_elem))
+    {
+      struct thread *waiter = list_entry (thread_elem, struct thread, elem);
+      int new_priority = thread_get_donated_priority (waiter, depth + 1);
+      if (new_priority > priority)
+        priority = new_priority;
+    }
+  }
+  return priority;
+}
+
+/* Returns the given thread's priority. */
+static int
+given_thread_get_priority (struct thread *t)
+{
+  return thread_get_donated_priority (t, 0);
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) 
 {
-  return thread_current ()->priority;
+  return given_thread_get_priority (thread_current ());
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -479,6 +531,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  list_init(&t->locks);
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
 }
@@ -507,7 +560,11 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else
-    return list_pop_highest_priority (&ready_list);
+  {
+    struct thread *t = list_highest_priority_thread(&ready_list);
+    list_remove(&t->elem);
+    return t;
+  }
 }
 
 /* Completes a thread switch by activating the new thread's page
@@ -599,17 +656,17 @@ uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 
 /* Pops and returns the highest priority thread in the list
  * with list_elem elem (ready_list or semaphore waiters) */
-struct thread *list_pop_highest_priority(struct list *l) {
+struct thread *list_highest_priority_thread(struct list *l) {
   struct list_elem *e = list_begin(l);
   struct thread *highest_priority_thread = 
     list_entry(e, struct thread, elem);
-  for (e = list_next(e); e != list_end(l); e = list_next(e))
+  while ((e = list_next(e)) != list_end(l))
   {
     struct thread *t = list_entry(e, struct thread, elem);
-    if (t->priority > highest_priority_thread->priority)
+    /* if (t->priority > highest_priority_thread->priority) */
+    if (given_thread_get_priority (t) > 
+        given_thread_get_priority (highest_priority_thread))
       highest_priority_thread = t;
   }
-  list_remove(&(highest_priority_thread->elem));
   return highest_priority_thread;
-
 }
