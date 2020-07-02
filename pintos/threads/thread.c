@@ -150,20 +150,23 @@ thread_tick (void)
   /* perform mlfqs related updates */
   if (thread_mlfqs)
   {
+    if (t != idle_thread)
+      t->recent_cpu += int_to_fp (1);
     /* Update load average and recent cpu */
     if (timer_ticks () % TIMER_FREQ == 0)
     {
       int ready_threads = list_size (&ready_list);
-      if (idle_thread == thread_current ())
+      if (idle_thread != thread_current ())
         ready_threads++;
+
       load_avg = 59 * load_avg / 60 + int_to_fp (ready_threads) / 60;
 
       struct list_elem *e;
       for (e = list_begin (&all_list); e != list_end (&all_list);
           e = list_next (e)) {
         struct thread *thread = list_entry (e, struct thread, allelem);
-        thread->recent_cpu = fp_mul(fp_div(2*load_avg, 2*load_avg + int_to_fp(1)),
-          thread->recent_cpu) + int_to_fp(thread->nice);
+        thread->recent_cpu = fp_mul (fp_div (2*load_avg, 2*load_avg + int_to_fp (1)),
+          thread->recent_cpu) + int_to_fp (thread->nice);
       }
     }
 
@@ -399,7 +402,7 @@ thread_set_priority (int new_priority)
 {
   thread_current ()->priority = new_priority;
   if (!list_empty (&ready_list) &&
-      new_priority < list_highest_priority_thread (&ready_list)->priority)
+      new_priority < given_thread_get_priority (list_highest_priority_thread (&ready_list)))
   {
     if (intr_context ()) {
       intr_yield_on_return();
@@ -454,10 +457,7 @@ given_thread_get_priority (struct thread *t)
 int
 thread_get_priority (void) 
 {
-  if (thread_mlfqs)
-    return thread_current ()->priority;
-  else
-    return given_thread_get_priority (thread_current ());
+  return given_thread_get_priority (thread_current ());
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -471,7 +471,7 @@ thread_set_nice (int nice)
 
   if (!list_empty (&ready_list) &&
       given_thread_get_priority(t) 
-      < list_highest_priority_thread (&ready_list)->priority)
+      < given_thread_get_priority (list_highest_priority_thread (&ready_list)))
   {
     if (intr_context ())
       intr_yield_on_return();
@@ -484,7 +484,7 @@ thread_set_nice (int nice)
 int
 thread_get_nice (void) 
 {
-  return thread_current ()->nice;
+  return running_thread ()->nice;
 }
 
 /* Returns 100 times the system load average. */
@@ -498,15 +498,15 @@ thread_get_load_avg (void)
 int
 thread_get_recent_cpu (void) 
 {
-  return fp_to_int(thread_current ()->recent_cpu, true);
+  return fp_to_int (100 * thread_current ()->recent_cpu, true);
 }
 
 /* Updates the threads priority */
 static void
 thread_update_mlfqs_priority (struct thread *t)
 {
-  t->priority = fp_to_int(int_to_fp(PRI_MAX) - (t->recent_cpu / 4) 
-    - (t->nice * 2), true);
+  t->priority = fp_to_int (int_to_fp (PRI_MAX) - (t->recent_cpu / 4) 
+    - (int_to_fp (t->nice) * 2), true);
 }
 
 
@@ -596,7 +596,7 @@ init_thread (struct thread *t, const char *name, int priority)
   list_init(&t->locks);
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
-  t->nice = 0;
+  t->nice = thread_get_nice ();
   t->recent_cpu = 0;
 
   if (thread_mlfqs)
