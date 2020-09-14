@@ -1,6 +1,16 @@
 #include <syscall.h>
 #include "../syscall-nr.h"
 
+/* NOTE: for syscallN, pintos comes with a bugs in constraints. It was
+ * originally "g", but needed to be changed to "r"(operand must be a
+ * general purpose register). Search "gcc inline assembly constraints"
+ * for more info.
+ *
+ * The bug caused parameters to be incorrectly pushed onto the stack.
+ * I'm not exactly sure why this is, but changing the constraint fixed
+ * it. It probably works on the Stanford machines but was never tested
+ * on more modern OS. */
+
 /* Invokes syscall NUMBER, passing no arguments, and returns the
    return value as an `int'. */
 #define syscall0(NUMBER)                                        \
@@ -23,7 +33,7 @@
             ("pushl %[arg0]; pushl %[number]; int $0x30; addl $8, %%esp" \
                : "=a" (retval)                                           \
                : [number] "i" (NUMBER),                                  \
-                 [arg0] "g" (ARG0)                                       \
+                 [arg0] "r" (ARG0)                                       \
                : "memory");                                              \
           retval;                                                        \
         })
@@ -38,8 +48,8 @@
              "pushl %[number]; int $0x30; addl $12, %%esp"      \
                : "=a" (retval)                                  \
                : [number] "i" (NUMBER),                         \
-                 [arg0] "g" (ARG0),                             \
-                 [arg1] "g" (ARG1)                              \
+                 [arg0] "r" (ARG0),                             \
+                 [arg1] "r" (ARG1)                              \
                : "memory");                                     \
           retval;                                               \
         })
@@ -54,9 +64,9 @@
              "pushl %[number]; int $0x30; addl $16, %%esp"      \
                : "=a" (retval)                                  \
                : [number] "i" (NUMBER),                         \
-                 [arg0] "g" (ARG0),                             \
-                 [arg1] "g" (ARG1),                             \
-                 [arg2] "g" (ARG2)                              \
+                 [arg0] "r" (ARG0),                             \
+                 [arg1] "r" (ARG1),                             \
+                 [arg2] "r" (ARG2)                              \
                : "memory");                                     \
           retval;                                               \
         })

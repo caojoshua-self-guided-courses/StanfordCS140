@@ -8,10 +8,10 @@
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/real-arithmetic.h"
 #include "threads/switch.h"
-#include "threads/synch.h"
 #include "threads/vaddr.h"
 #ifdef USERPROG
 #include "userprog/process.h"
@@ -250,6 +250,9 @@ thread_create (const char *name, int priority,
 
   intr_set_level (old_level);
 
+  t->alive_sema = malloc (sizeof (struct semaphore));
+  sema_init (t->alive_sema, 0);
+
   /* Add to run queue. */
   thread_unblock (t);
 
@@ -354,8 +357,11 @@ thread_exit (void)
      and schedule another process.  That process will destroy us
      when it calls thread_schedule_tail(). */
   intr_disable ();
-  list_remove (&thread_current()->allelem);
-  thread_current ()->status = THREAD_DYING;
+  struct thread* cur = thread_current();
+  if (cur->alive_sema)
+    sema_up (cur->alive_sema);
+  list_remove (&cur->allelem);
+  cur->status = THREAD_DYING;
   schedule ();
   NOT_REACHED ();
 }
@@ -738,4 +744,20 @@ struct thread *list_highest_priority_thread(struct list *l) {
       highest_priority_thread = t;
   }
   return highest_priority_thread;
+}
+
+/* Get thread with given tid */
+struct thread *get_thread(tid_t tid)
+{
+  struct list_elem *e;
+  for (e = list_begin (&all_list); e != list_end (&all_list);
+      e = list_next (e))
+  {
+    struct thread *t = list_entry (e, struct thread, allelem);
+    if (t->tid == tid)
+    {
+      return t;
+    }
+  }
+  return 0;
 }

@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -101,10 +102,14 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    char file_name[16];                 /* Used in exit message */
 #endif
 
     /* Owned by timer.c */
     int64_t next_wakeup;                /* Schedule wakeup for sleeping thread */
+
+    /* Owned by thread.c and process.c */
+    struct semaphore* alive_sema;            /* Represents if thread is alive */
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
@@ -147,5 +152,7 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 struct thread *list_highest_priority_thread(struct list *);
+
+struct thread *get_thread (tid_t tid);
 
 #endif /* threads/thread.h */

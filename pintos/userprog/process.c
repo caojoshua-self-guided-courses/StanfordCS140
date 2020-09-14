@@ -50,7 +50,11 @@ process_execute (const char *file_name)
 static void
 start_process (void *file_name_)
 {
-  char *file_name = file_name_;
+  /* char *file_name = file_name_; */
+  const int COMMAND_MAX_CHARS = 128;
+  char file_name[COMMAND_MAX_CHARS];
+  strlcpy (file_name, file_name_, COMMAND_MAX_CHARS);
+  
   struct intr_frame if_;
   bool success;
 
@@ -59,12 +63,65 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
+
+  /* strip the file name(first arg) and prepare token and save_ptr for
+   * iterating other arguments */
+  char *save_ptr;
+  char *token = strtok_r (file_name, " ", &save_ptr); 
   success = load (file_name, &if_.eip, &if_.esp);
 
+  /* make copy of file name because palloc_free_page does not have
+   * const qualifier on the passed char pointer */
+  const int MAX_CHARS = 16;
+  char file_name_copy[MAX_CHARS];
+  strlcpy (file_name_copy, file_name, MAX_CHARS);
+
+  /* Copy string to thread to be used in the exit message.
+   * Needed to past test cases */
+  strlcpy (thread_current ()->file_name, file_name, MAX_CHARS);
+  
   /* If load failed, quit. */
-  palloc_free_page (file_name);
+  palloc_free_page (file_name_);
   if (!success) 
     thread_exit ();
+  
+  /* setup call stack */
+  const int MAX_ARGS = 32;
+  char *str_ptrs[MAX_ARGS];
+  int total_size = 0;
+  int argc = 0;
+  
+  /* push strings to stack */
+  for ( ; token != NULL && argc < MAX_ARGS; token = strtok_r (NULL, " ", &save_ptr))
+  {
+    int size = strlen (token) + 1; // add 1 for null byte
+    if_.esp -= size;
+    memcpy (if_.esp, token, size); 
+    total_size += size;
+    str_ptrs[argc++] = if_.esp;
+  }
+
+  /* word-align to 4 bytes and set argv[argc] to 0 */
+  int offset = total_size % 4 + 4;
+  if_.esp -= offset;
+  memset (if_.esp, 0, offset);
+
+  /* push pointers to strings onto stack */
+  for (int i = argc-1; i >= 0; --i)
+  {
+    if_.esp -= 4;
+    *(int32_t *) if_.esp = (int32_t) str_ptrs[i];
+  }
+
+  /* push argv and argc to stack */
+  if_.esp -= 4;
+  *(int32_t *) if_.esp = (int) if_.esp + 4;
+  if_.esp -= 4;
+  *(int32_t *) if_.esp = argc;
+
+  // push fake return address
+  if_.esp -= 4;
+  memset(if_.esp, 0, 4);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -86,8 +143,12 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
+  struct thread *t = get_thread (child_tid);
+  struct semaphore *sema = t->alive_sema;
+  sema_down (sema);
+  sema_up (sema);
   return -1;
 }
 
