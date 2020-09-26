@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "devices/shutdown.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
@@ -25,6 +27,24 @@ static void
 exit (int status)
 {
   printf("%s: exit(%d)\n", thread_current ()->file_name, status);
+}
+
+static bool
+create (const char *file, unsigned initial_size)
+{
+  return filesys_create (file, initial_size); 
+}
+
+static bool
+remove (const char *file)
+{
+  return filesys_remove (file);
+}
+
+static int
+open (const char *file)
+{
+  return file_open;
 }
 
 static int
@@ -69,8 +89,17 @@ syscall_handler (struct intr_frame *f)
       thread_exit ();
       break;
       }
+    case SYS_CREATE:
+      f->eax = create (*(const char **)(esp + 4), *(int *)(esp + 8));
+      break;
+    case SYS_REMOVE:
+      f->eax = remove (*(const char **)(esp + 4));
+      break;
+    case SYS_OPEN:
+      /* f->eax = open (*(const char **)(esp + 4)); */
+      break;
     case SYS_WRITE:
-      f->eax = write(*(int *)(esp + 4), (void *) *(int *)(esp + 8), 
+      f->eax = write (*(int *)(esp + 4), (void *) *(int *)(esp + 8), 
           *(unsigned *)(esp + 12));
       break;
     default:
