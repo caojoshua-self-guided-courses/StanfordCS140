@@ -113,8 +113,8 @@ sema_up (struct semaphore *sema)
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
-     /* important change: increment sema before block, otherwise the new
-     * running thread will see that sema == 0, and will block itself */
+  /* important change: increment sema before block, otherwise the new
+   * running thread will see that sema == 0, and will block itself */
   sema->value++;
   if (!list_empty (&sema->waiters)) {
     struct thread *t = (list_highest_priority_thread (&sema->waiters));

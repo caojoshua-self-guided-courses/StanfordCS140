@@ -146,9 +146,12 @@ int
 process_wait (tid_t child_tid) 
 {
   struct thread *t = get_thread (child_tid);
-  struct semaphore *sema = t->alive_sema;
-  sema_down (sema);
-  sema_up (sema);
+  if (t)
+  {
+    struct semaphore *sema = t->alive_sema;
+    sema_down (sema);
+    sema_up (sema);
+  }
   return -1;
 }
 
@@ -372,9 +375,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
   success = true;
 
  done:
+ {
   /* We arrive here whether the load is successful or not. */
+  struct thread *cur = thread_current();
+  cur->loaded_success = success;
+  sema_up (cur->loaded_sema);
   file_close (file);
   return success;
+ }
 }
 
 /* load() helpers. */

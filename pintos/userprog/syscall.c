@@ -10,8 +10,13 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
+#include "userprog/process.h"
 
 static void syscall_handler (struct intr_frame *);
+
+/* Process identifier. */
+typedef int pid_t;
+#define PID_ERROR ((pid_t) -1)
 
 /* Min fd. fd 0 and fd 1 are reserved for stdin and stdout 
  * respectively. */
@@ -101,6 +106,28 @@ static void
 exit (int status)
 {
   printf("%s: exit(%d)\n", thread_current ()->file_name, status);
+}
+
+static pid_t
+exec (const char *cmd_line)
+{
+  tid_t tid = process_execute (cmd_line);
+  struct thread *t = get_thread (tid);
+  if (t)
+  {
+    sema_down (t->loaded_sema);
+    if (t->loaded_success)
+      /* NOTE: treat pid same as tid for this project */
+      return tid;
+    return PID_ERROR;
+  }
+  return PID_ERROR; 
+}
+
+static int
+wait (pid_t pid)
+{
+  return process_wait (pid);
 }
 
 static bool
@@ -210,6 +237,11 @@ syscall_handler (struct intr_frame *f)
       thread_exit ();
       break;
       }
+    case SYS_EXEC:
+      f->eax = exec (*(const char **)(esp + 4));
+      break;
+    case SYS_WAIT:
+      f->eax = wait (*(int *)(esp + 4));
     case SYS_CREATE:
       f->eax = create (*(const char **)(esp + 4), *(int *)(esp + 8));
       break;

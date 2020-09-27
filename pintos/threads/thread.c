@@ -250,6 +250,8 @@ thread_create (const char *name, int priority,
 
   intr_set_level (old_level);
 
+  t->loaded_sema = malloc (sizeof (struct semaphore));
+  sema_init (t->loaded_sema, 0);
   t->alive_sema = malloc (sizeof (struct semaphore));
   sema_init (t->alive_sema, 0);
 
