@@ -1,6 +1,7 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+#include "devices/input.h"
 #include "devices/shutdown.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -68,15 +69,15 @@ create_fd (const char *file_name)
 }
 
 /* Returns the file associated with the given fd */
-static struct file*
-get_file (int fd)
+static struct fd_entry*
+get_fd_entry (int fd)
 {
   struct list_elem *e;
   for (e = list_begin (&fd_list); e != list_end (&fd_list); e = list_next (e))
   {
     struct fd_entry *fd_entry = list_entry (e, struct fd_entry, elem); 
     if (fd_entry->fd == fd)
-      return fd_entry->file;
+      return fd_entry;
   }
   return NULL;
 }
@@ -127,8 +128,62 @@ write (int fd, const void *buffer, unsigned length)
     putbuf (buffer, length);
     return length;
   }
-  // TODO: write to file
-  return length;
+  struct fd_entry *fd_entry = get_fd_entry (fd);
+  if (fd_entry)
+    return file_write (fd_entry->file, buffer, length);  
+  return 0;
+}
+
+static int
+filesize (int fd)
+{
+  struct fd_entry *fd_entry = get_fd_entry (fd);
+  if (fd_entry)
+    return file_length (fd_entry->file);
+  return -1;
+}
+
+static int
+read (int fd, void *buffer, unsigned size)
+{
+  /* fd 0 is keyboard */
+  if (fd == 0)
+  {
+    *(uint8_t *) buffer = input_getc();
+    return 1;
+  }
+  struct fd_entry *fd_entry = get_fd_entry (fd);
+  if (fd_entry)
+    return file_read (fd_entry->file, buffer, size); 
+  return -1;
+}
+
+static void
+seek (int fd, unsigned position)
+{
+  struct fd_entry *fd_entry = get_fd_entry(fd);
+  if (fd_entry)
+    file_seek (fd_entry->file, position);
+}
+
+static unsigned
+tell (int fd)
+{
+  struct fd_entry *fd_entry = get_fd_entry(fd);
+  if (fd_entry)
+    return file_tell (fd_entry->file);
+  return -1;
+}
+
+static void
+close (int fd)
+{
+  struct fd_entry *fd_entry = get_fd_entry(fd);
+  if (fd_entry)
+  {
+    list_remove (&fd_entry->elem);
+    file_close (fd_entry->file);
+  }
 }
 
 static void
@@ -167,6 +222,22 @@ syscall_handler (struct intr_frame *f)
     case SYS_WRITE:
       f->eax = write (*(int *)(esp + 4), (void *) *(int *)(esp + 8), 
           *(unsigned *)(esp + 12));
+      break;
+    case SYS_FILESIZE:
+      f->eax = filesize (*(int *)(esp + 4));
+      break;
+    case SYS_READ:
+      f->eax = read (*(int *)(esp + 4), (void *) *(int *)(esp + 8), 
+          *(unsigned *)(esp + 12));
+      break;
+    case SYS_SEEK:
+      seek (*(int *)(esp + 4), *(int *)(esp + 8));
+      break;
+    case SYS_TELL:
+      f->eax = tell (*(int *)(esp + 4)); 
+      break;
+    case SYS_CLOSE:
+      close(*(int *)(esp + 4));
       break;
     default:
       thread_exit();
