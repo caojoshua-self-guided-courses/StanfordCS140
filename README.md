@@ -6,4 +6,11 @@ Everything is run on docker. Run `sudo make docker-container`. This will mount t
 
 ## Additional info
 * When switching between projects, make sure to edit `pintos/utils/Pintos.pm` line 362 and `pintos/utils/pintos` line 259 so they are looking in the right build directory. Otherwise pintos will be unable to run tests for the project.
-* There was a bug in the assembly in `pintos/lib/user/syscall.c` that incorrectly pushed up parameters in the stack. This took FOREVER to fix, and is the only code that probably was not intended to be touched but was changed anyway. See the comment in the top of the file for the fix. See [GCC inline assembly constraint docs](https://www.felixcloutier.com/documents/gcc-asm.html#constraints) to better understand the problem.
+
+## Random Implementation Notes
+Adding some random tidbits here because I'm too lazy to create design docs.
+
+### Project 2 User Programs
+* There was a bug in the assembly in `pintos/lib/user/syscall.c` that incorrectly pushed parameters onto the stack. This took FOREVER to fix, and is the only code that was not intended to be touched by the instructors but was changed anyway. See the comment in the top of the file for the fix. See [GCC inline assembly constraint docs](https://www.felixcloutier.com/documents/gcc-asm.html#constraints) to better understand the problem.
+* For simplicity, I am treating TID and PID the same. This is fine for the parent thread of a process, but this can break in real life scenarios eg. child thread of a process should still have the same PID, but my implementation uses its TID, which will be different from the parent TID. The only case I found where PID matters is in system wait, where only a parent process can wait for a child process, which my implementation checks through PID. So in the example, a child thread of the same process would be unable to wait for a child process. I believe in Pintos, user programs all run on one thread, so the implementation works for this project.
+* Everything in `struct process`, which I created, could be moved to `struct thread` for this project, but I think its good to have two separate structs. Although pintos treats processes and threads so similarly, there are real life examples (such as the one above), where there needs to be separate logic. Some things that a `struct process` could contain are PID, child/parent processes, threads, and exit status. It could be interested looking at Linux and other existing implementations on threads and processes.
