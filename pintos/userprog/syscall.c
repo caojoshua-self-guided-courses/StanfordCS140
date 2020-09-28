@@ -14,10 +14,6 @@
 
 static void syscall_handler (struct intr_frame *);
 
-/* Process identifier. */
-typedef int pid_t;
-#define PID_ERROR ((pid_t) -1)
-
 /* Min fd. fd 0 and fd 1 are reserved for stdin and stdout 
  * respectively. */
 static const int MIN_FD = 2;
@@ -105,6 +101,17 @@ halt (void)
 static void
 exit (int status)
 {
+  /* NOTE: exit is only syscall that contains process logic because its
+   * awkward passing status to thread_exit */
+
+  /* Update the processes exit status. This status will persist after
+   * this process is terminating in case the parent process wants
+   * to retrieve it */
+  struct process *process = get_process (thread_current ()->tid);
+  if (process)
+    process->status = status;
+
+  /* Error message for passing test cases */
   printf("%s: exit(%d)\n", thread_current ()->file_name, status);
 }
 
@@ -116,10 +123,9 @@ exec (const char *cmd_line)
   if (t)
   {
     sema_down (t->loaded_sema);
+    /* Only return the tid if the executable is loaded successfully */
     if (t->loaded_success)
-      /* NOTE: treat pid same as tid for this project */
       return tid;
-    return PID_ERROR;
   }
   return PID_ERROR; 
 }
@@ -242,6 +248,7 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_WAIT:
       f->eax = wait (*(int *)(esp + 4));
+      break;
     case SYS_CREATE:
       f->eax = create (*(const char **)(esp + 4), *(int *)(esp + 8));
       break;

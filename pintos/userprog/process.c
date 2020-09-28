@@ -14,12 +14,54 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
+/* Get exit status entry for the given pid */
+struct process *
+get_process (pid_t pid)
+{
+  struct list_elem *e;
+  for (e = list_begin (&process_list); e != list_end (&process_list);
+        e = list_next (e))
+  {
+    struct process *p = list_entry (e, struct process, elem); 
+    if (p->pid == pid)
+      return p;
+  }
+  return NULL;
+}
+
+/* Clean up a process */
+static void
+clean_process (pid_t pid)
+{
+  struct process *process = get_process (pid);
+  list_remove (&process->elem);
+  free (process);
+}
+
+/* Clean up children processes */
+void
+clean_child_processes (pid_t parent_pid)
+{
+  struct list_elem *e;
+  for (e = list_begin (&process_list); e != list_end (&process_list);
+      e = list_next (e))
+  {
+    struct process *p = list_entry (e, struct process, elem);
+    if (p->parent_pid == parent_pid)
+    {
+      e = list_prev (e);
+      clean_process (p->pid);
+    }
+  }
+}
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -38,10 +80,27 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  /* Add the process to process list. Its important to do so before
+   * running the process because the process may exit before 
+   * process_execute returns, and will need to update the exit
+   * status */
+  struct process *process = malloc (sizeof (struct process));
+  if (process)
+  {
+    /* setting status to -1 will ensure correct status in case
+     * it is terminated by the kernel */
+    process->status = -1;
+    process->parent_pid = thread_current ()->tid;
+    process->is_waited_on = false;
+    list_push_back (&process_list, &process->elem);
+  }
+
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+  else
+    process->pid = tid;
   return tid;
 }
 
@@ -138,19 +197,25 @@ start_process (void *file_name_)
    exception), returns -1.  If TID is invalid or if it was not a
    child of the calling process, or if process_wait() has already
    been successfully called for the given TID, returns -1
-   immediately, without waiting.
-
-   This function will be implemented in problem 2-2.  For now, it
-   does nothing. */
+   immediately, without waiting. */
 int
 process_wait (tid_t child_tid) 
 {
-  struct thread *t = get_thread (child_tid);
-  if (t)
+  pid_t cur = thread_current ()->tid;
+  struct process *p = get_process (child_tid);
+  if (p && p->parent_pid == cur && !p->is_waited_on)
   {
-    struct semaphore *sema = t->alive_sema;
-    sema_down (sema);
-    sema_up (sema);
+    /* ensure future calls to wait on this process fail */
+    p->is_waited_on = true;
+    struct thread *t = get_thread (child_tid);
+    if (t)
+    {
+      /* Wait until the thread is no longer alive */
+      struct semaphore *sema = t->alive_sema;
+      sema_down (sema);
+      sema_up (sema);
+    }
+    return p->status;
   }
   return -1;
 }
@@ -160,6 +225,7 @@ void
 process_exit (void)
 {
   struct thread *cur = thread_current ();
+  clean_child_processes (cur->tid);
   uint32_t *pd;
 
   /* Destroy the current process's page directory and switch back
@@ -379,6 +445,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* We arrive here whether the load is successful or not. */
   struct thread *cur = thread_current();
   cur->loaded_success = success;
+  if (!success)
+    clean_process (cur->tid);
   sema_up (cur->loaded_sema);
   file_close (file);
   return success;
