@@ -13,6 +13,7 @@
 #include "userprog/process.h"
 
 static void syscall_handler (struct intr_frame *);
+static void exit (int status);
 
 /* Min fd. fd 0 and fd 1 are reserved for stdin and stdout 
  * respectively. */
@@ -83,11 +84,14 @@ get_fd_entry (int fd)
   return NULL;
 }
 
-static bool
-is_valid_user_addr(const void *uaddr)
+/* Validate uaddr as a user address. If uaddr is not valid
+ * terminate the thread */
+static void
+validate_uaddr (const void *uaddr)
 {
-  return uaddr && is_user_vaddr(uaddr) &&
-    pagedir_get_page(thread_current()->pagedir, uaddr);
+  if (!uaddr || !is_user_vaddr(uaddr) ||
+    !pagedir_get_page(thread_current()->pagedir, uaddr))
+    exit (-1);
 }
 
 /********** SYSTEM CALLS **********/
@@ -113,11 +117,15 @@ exit (int status)
 
   /* Error message for passing test cases */
   printf("%s: exit(%d)\n", thread_current ()->file_name, status);
+
+  /* Terminate the thread */
+  thread_exit ();
 }
 
 static pid_t
 exec (const char *cmd_line)
 {
+  validate_uaddr (cmd_line);
   tid_t tid = process_execute (cmd_line);
   struct thread *t = get_thread (tid);
   if (t)
@@ -139,24 +147,28 @@ wait (pid_t pid)
 static bool
 create (const char *file, unsigned initial_size)
 {
+  validate_uaddr (file);
   return filesys_create (file, initial_size); 
 }
 
 static bool
 remove (const char *file)
 {
+  validate_uaddr (file);
   return filesys_remove (file);
 }
 
 static int
 open (const char *file)
 {
+  validate_uaddr (file);
   return create_fd (file);
 }
 
 static int
 write (int fd, const void *buffer, unsigned length)
 {
+  validate_uaddr (buffer);
   if (fd == 1) {
     putbuf (buffer, length);
     return length;
@@ -179,6 +191,7 @@ filesize (int fd)
 static int
 read (int fd, void *buffer, unsigned size)
 {
+  validate_uaddr (buffer);
   /* fd 0 is keyboard */
   if (fd == 0)
   {
@@ -223,11 +236,7 @@ static void
 syscall_handler (struct intr_frame *f) 
 {
   void *esp = f->esp;
-
-  if (!is_valid_user_addr(esp)) {
-    printf("stack pointer not a valid user address!\n");
-    return;
-  }
+  validate_uaddr (esp);
   
   uint32_t sys_call_num = *(int *) esp;
   switch (sys_call_num)
@@ -237,10 +246,7 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_EXIT:
       {
-      int status = *(int *)(esp + 4);
-      exit(status);
-      f->eax = status;
-      thread_exit ();
+      exit (*(int *)(esp + 4));
       break;
       }
     case SYS_EXEC:
