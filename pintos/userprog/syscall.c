@@ -13,7 +13,6 @@
 #include "userprog/process.h"
 
 static void syscall_handler (struct intr_frame *);
-static void exit (int status);
 
 /* Min fd. fd 0 and fd 1 are reserved for stdin and stdout 
  * respectively. */
@@ -102,7 +101,9 @@ halt (void)
   shutdown_power_off();
 }
 
-static void
+/* The exit syscall is the only non-static syscall because its called in
+ * Exception.c when there is a user page fault */
+void
 exit (int status)
 {
   /* NOTE: exit is only syscall that contains process logic because its
