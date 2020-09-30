@@ -226,6 +226,8 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   clean_child_processes (cur->tid);
+  if (cur->executable)
+    file_close (cur->executable);
   uint32_t *pd;
 
   /* Destroy the current process's page directory and switch back
@@ -445,10 +447,11 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* We arrive here whether the load is successful or not. */
   struct thread *cur = thread_current();
   cur->loaded_success = success;
+  cur->executable = file;
+  file_deny_write (file);
   if (!success)
     clean_process (cur->tid);
   sema_up (cur->loaded_sema);
-  file_close (file);
   return success;
  }
 }

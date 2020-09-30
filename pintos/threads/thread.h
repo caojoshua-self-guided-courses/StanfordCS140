@@ -103,6 +103,7 @@ struct thread
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
     char file_name[16];                 /* Used in exit message */
+    struct file *executable;            /* Running executable*/
 #endif
 
     /* Owned by timer.c */
