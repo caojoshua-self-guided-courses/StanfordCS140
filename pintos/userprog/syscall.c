@@ -94,6 +94,14 @@ validate_uaddr (const void *uaddr)
     exit (-1);
 }
 
+/* Validate the number of args above esp on the stack */
+static void
+validate_args (const void *esp, unsigned args)
+{
+  for (unsigned i = 0; i <= args; ++i)
+    validate_uaddr (esp + (i * 4));
+}
+
 /* Validates the first and last bytes in a string */
 static void
 validate_string (const void *string)
@@ -261,43 +269,53 @@ syscall_handler (struct intr_frame *f)
       halt();
       break;
     case SYS_EXIT:
-      {
+      validate_args (esp, 1);
       exit (*(int *)(esp + 4));
       break;
-      }
     case SYS_EXEC:
+      validate_args (esp, 1);
       f->eax = exec (*(const char **)(esp + 4));
       break;
     case SYS_WAIT:
+      validate_args (esp, 1);
       f->eax = wait (*(int *)(esp + 4));
       break;
     case SYS_CREATE:
+      validate_args (esp, 2);
       f->eax = create (*(const char **)(esp + 4), *(int *)(esp + 8));
       break;
     case SYS_REMOVE:
+      validate_args (esp, 1);
       f->eax = remove (*(const char **)(esp + 4));
       break;
     case SYS_OPEN:
+      validate_args (esp, 1);
       f->eax = open (*(const char **)(esp + 4));
       break;
     case SYS_FILESIZE:
+      validate_args (esp, 1);
       f->eax = filesize (*(int *)(esp + 4));
       break;
     case SYS_READ:
+      validate_args (esp, 3);
       f->eax = read (*(int *)(esp + 4), (void *) *(int *)(esp + 8), 
           *(unsigned *)(esp + 12));
       break;
     case SYS_WRITE:
+      validate_args (esp, 3);
       f->eax = write (*(int *)(esp + 4), (void *) *(int *)(esp + 8), 
           *(unsigned *)(esp + 12));
       break;
     case SYS_SEEK:
+      validate_args (esp, 2);
       seek (*(int *)(esp + 4), *(int *)(esp + 8));
       break;
     case SYS_TELL:
+      validate_args (esp, 1);
       f->eax = tell (*(int *)(esp + 4)); 
       break;
     case SYS_CLOSE:
+      validate_args (esp, 1);
       close(*(int *)(esp + 4));
       break;
     default:
