@@ -5,6 +5,7 @@
 #include "devices/shutdown.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "lib/string.h"
 #include "threads/interrupt.h"
 #include "threads/malloc.h"
 #include "threads/thread.h"
@@ -93,6 +94,15 @@ validate_uaddr (const void *uaddr)
     exit (-1);
 }
 
+/* Validates the first and last bytes in a string */
+static void
+validate_string (const void *string)
+{
+  validate_uaddr (string);
+  validate_uaddr (string + strlen (string));
+}
+
+
 /********** SYSTEM CALLS **********/
 
 static void
@@ -126,7 +136,8 @@ exit (int status)
 static pid_t
 exec (const char *cmd_line)
 {
-  validate_uaddr (cmd_line);
+  validate_string (cmd_line);
+
   tid_t tid = process_execute (cmd_line);
   struct thread *t = get_thread (tid);
   if (t)
@@ -148,36 +159,22 @@ wait (pid_t pid)
 static bool
 create (const char *file, unsigned initial_size)
 {
-  validate_uaddr (file);
+  validate_string (file);
   return filesys_create (file, initial_size); 
 }
 
 static bool
 remove (const char *file)
 {
-  validate_uaddr (file);
+  validate_string (file);
   return filesys_remove (file);
 }
 
 static int
 open (const char *file)
 {
-  validate_uaddr (file);
+  validate_string (file);
   return create_fd (file);
-}
-
-static int
-write (int fd, const void *buffer, unsigned length)
-{
-  validate_uaddr (buffer);
-  if (fd == 1) {
-    putbuf (buffer, length);
-    return length;
-  }
-  struct fd_entry *fd_entry = get_fd_entry (fd);
-  if (fd_entry)
-    return file_write (fd_entry->file, buffer, length);  
-  return 0;
 }
 
 static int
@@ -193,6 +190,8 @@ static int
 read (int fd, void *buffer, unsigned size)
 {
   validate_uaddr (buffer);
+  validate_uaddr (buffer + size);
+  
   /* fd 0 is keyboard */
   if (fd == 0)
   {
@@ -203,6 +202,22 @@ read (int fd, void *buffer, unsigned size)
   if (fd_entry)
     return file_read (fd_entry->file, buffer, size); 
   return -1;
+}
+
+static int
+write (int fd, const void *buffer, unsigned size)
+{
+  validate_uaddr (buffer);
+  validate_uaddr (buffer + size);
+
+  if (fd == 1) {
+    putbuf (buffer, size);
+    return size;
+  }
+  struct fd_entry *fd_entry = get_fd_entry (fd);
+  if (fd_entry)
+    return file_write (fd_entry->file, buffer, size);  
+  return 0;
 }
 
 static void
@@ -265,15 +280,15 @@ syscall_handler (struct intr_frame *f)
     case SYS_OPEN:
       f->eax = open (*(const char **)(esp + 4));
       break;
-    case SYS_WRITE:
-      f->eax = write (*(int *)(esp + 4), (void *) *(int *)(esp + 8), 
-          *(unsigned *)(esp + 12));
-      break;
     case SYS_FILESIZE:
       f->eax = filesize (*(int *)(esp + 4));
       break;
     case SYS_READ:
       f->eax = read (*(int *)(esp + 4), (void *) *(int *)(esp + 8), 
+          *(unsigned *)(esp + 12));
+      break;
+    case SYS_WRITE:
+      f->eax = write (*(int *)(esp + 4), (void *) *(int *)(esp + 8), 
           *(unsigned *)(esp + 12));
       break;
     case SYS_SEEK:
