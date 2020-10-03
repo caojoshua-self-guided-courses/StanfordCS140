@@ -150,9 +150,10 @@ exec (const char *cmd_line)
   struct thread *t = get_thread (tid);
   if (t)
   {
+    struct process *p = get_process (t->tid);
     sema_down (t->loaded_sema);
     /* Only return the tid if the executable is loaded successfully */
-    if (t->loaded_success)
+    if (p && p->loaded_success)
       return tid;
   }
   return PID_ERROR; 

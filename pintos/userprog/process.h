@@ -7,14 +7,15 @@
 typedef int pid_t;
 #define PID_ERROR ((pid_t) -1)
 
-/* Struct to hold process data. Note that this only contains
- * enough data for exit status logic. Process structs live
- * after process termination to hold their exit status */
+/* Struct process to hold process data after a thread is
+ * freed. For example, the exit status and success status
+ * of loading a process must live after the thread exits */
 struct process
 {
   int status;
   pid_t pid;
   pid_t parent_pid;
+  bool loaded_success;
   bool is_waited_on;
   struct list_elem elem;
 };

@@ -446,11 +446,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
  {
   /* We arrive here whether the load is successful or not. */
   struct thread *cur = thread_current();
-  cur->loaded_success = success;
-  cur->executable = file;
-  file_deny_write (file);
-  if (!success)
-    clean_process (cur->tid);
+  get_process (cur->tid)->loaded_success = success;
+  if (file)
+  {
+    cur->executable = file;
+    file_deny_write (file);
+  }
   sema_up (cur->loaded_sema);
   return success;
  }

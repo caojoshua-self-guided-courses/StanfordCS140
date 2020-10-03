@@ -110,9 +110,7 @@ struct thread
     int64_t next_wakeup;                /* Schedule wakeup for sleeping thread */
 
     /* Owned by thread.c and process.c */
-    struct semaphore *loaded_sema;           /* Represents if a process
-                                                loaded its executable */
-    bool loaded_success;                       /* Executable loading successful */
+    struct semaphore *loaded_sema;           /* Loaded executable sema */
     struct semaphore *alive_sema;            /* Represents if thread is alive */
 
     /* Owned by thread.c. */
