@@ -6,6 +6,9 @@ Everything is run on docker. Run `sudo make docker-container`. This will mount t
 
 ## Additional info
 * When switching between projects, make sure to edit `pintos/utils/Pintos.pm` line 362 and `pintos/utils/pintos` line 259 so they are looking in the right build directory. Otherwise pintos will be unable to run tests for the project.
+* A project is considered complete when all the given test cases pass. There is some possibility that test cases from previous projects are broken when working on new projects. Here are the commits where a project was completed:
+  * [Project 1 Threads](https://github.com/caojoshua/StanfordCS140/tree/ec0d98c73b93d8ff03eaeffa0d05de29efb6d827). Some of the docker setup might be messed up here.
+  * [Project 2 User Programs](https://github.com/caojoshua/StanfordCS140/tree/cce3d0c15f86a31a0621c84ddfa0847799169517)
 
 ## Random Implementation Notes
 Adding some random tidbits here because I'm too lazy to create design docs.
