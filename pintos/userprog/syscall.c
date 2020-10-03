@@ -26,6 +26,7 @@ static struct list fd_list;
 struct fd_entry
 {
   int fd;
+  pid_t pid;  /* only the process that opened this fd has permissions */
   struct file *file;
   struct list_elem elem;
 };
@@ -66,6 +67,7 @@ create_fd (const char *file_name)
     ++fd;
   }
   fd_entry->fd = fd;
+  fd_entry->pid = thread_current ()->tid;
   list_insert (e, &fd_entry->elem);
   return fd_entry->fd;
 }
@@ -190,7 +192,7 @@ static int
 filesize (int fd)
 {
   struct fd_entry *fd_entry = get_fd_entry (fd);
-  if (fd_entry)
+  if (fd_entry && fd_entry->pid == thread_current ()->tid)
     return file_length (fd_entry->file);
   return -1;
 }
@@ -208,7 +210,7 @@ read (int fd, void *buffer, unsigned size)
     return 1;
   }
   struct fd_entry *fd_entry = get_fd_entry (fd);
-  if (fd_entry)
+  if (fd_entry && fd_entry->pid == thread_current ()->tid)
     return file_read (fd_entry->file, buffer, size); 
   return -1;
 }
@@ -224,7 +226,7 @@ write (int fd, const void *buffer, unsigned size)
     return size;
   }
   struct fd_entry *fd_entry = get_fd_entry (fd);
-  if (fd_entry)
+  if (fd_entry && fd_entry->pid == thread_current ()->tid)
     return file_write (fd_entry->file, buffer, size);  
   return 0;
 }
@@ -233,7 +235,7 @@ static void
 seek (int fd, unsigned position)
 {
   struct fd_entry *fd_entry = get_fd_entry(fd);
-  if (fd_entry)
+  if (fd_entry && fd_entry->pid == thread_current ()->tid)
     file_seek (fd_entry->file, position);
 }
 
@@ -241,7 +243,7 @@ static unsigned
 tell (int fd)
 {
   struct fd_entry *fd_entry = get_fd_entry(fd);
-  if (fd_entry)
+  if (fd_entry && fd_entry->pid == thread_current ()->tid)
     return file_tell (fd_entry->file);
   return -1;
 }
@@ -250,7 +252,7 @@ static void
 close (int fd)
 {
   struct fd_entry *fd_entry = get_fd_entry(fd);
-  if (fd_entry)
+  if (fd_entry && fd_entry->pid == thread_current ()->tid)
   {
     list_remove (&fd_entry->elem);
     file_close (fd_entry->file);
