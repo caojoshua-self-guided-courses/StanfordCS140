@@ -86,6 +86,25 @@ get_fd_entry (int fd)
   return NULL;
 }
 
+/* Cleans FDs with given pid */
+static void
+clean_fds (pid_t pid)
+{
+  struct list_elem *e;
+  for (e = list_begin (&fd_list); e != list_end (&fd_list); e = list_next (e))
+  {
+    struct fd_entry *fd_entry = list_entry (e, struct fd_entry, elem); 
+    if (fd_entry->pid == pid)
+    {
+      struct list_elem *temp = list_prev (e);
+      list_remove (e);
+      e = temp;
+      file_close (fd_entry->file);
+      free (fd_entry);
+    }
+  }
+}
+
 /* Validate uaddr as a user address. If uaddr is not valid
  * terminate the thread */
 static void
@@ -134,7 +153,10 @@ exit (int status)
    * to retrieve it */
   struct process *process = get_process (thread_current ()->tid);
   if (process)
+  {
     process->status = status;
+    clean_fds (process->pid);
+  }
 
   /* Error message for passing test cases */
   printf("%s: exit(%d)\n", thread_current ()->file_name, status);
