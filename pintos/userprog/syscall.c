@@ -19,14 +19,10 @@ static void syscall_handler (struct intr_frame *);
  * respectively. */
 static const int MIN_FD = 2;
 
-/* List of fd_entries, sorted by fd */
-static struct list fd_list;
-
-/* Elements of fd_list that map fd to files */
-struct fd_entry
+/* Elements of process->fd_map that map fd to files */
+struct file_descriptor
 {
   int fd;
-  pid_t pid;  /* only the process that opened this fd has permissions */
   struct file *file;
   struct list_elem elem;
 };
@@ -36,7 +32,6 @@ void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
-  list_init (&fd_list);
 }
 
 /* Create and return a new file descriptor. */
@@ -49,39 +44,50 @@ create_fd (const char *file_name)
   if (!file)
     return -1;
 
-  int fd = MIN_FD;
-  struct fd_entry *fd_entry = malloc (sizeof (struct fd_entry));
-  fd_entry->file = file;
-
-  /* Iterate through the fd list until there is an open fd */
-  struct list_elem *e; 
-  for (e = list_begin (&fd_list); e != list_end (&fd_list); e = list_next (e))
+  struct process *process = thread_current ()->process;
+  if (process)
   {
-    struct fd_entry *fde = list_entry (e, struct fd_entry, elem); 
-    if (fd != fde->fd)
+    int fd = MIN_FD;
+    struct list *fd_map = &process->fd_map;
+
+    struct file_descriptor *file_descriptor = malloc (sizeof (struct file_descriptor));
+    file_descriptor->file = file;
+
+    /* Iterate through the fd list until there is an open fd */
+    struct list_elem *e; 
+    for (e = list_begin (fd_map); e != list_end (fd_map); e = list_next (e))
     {
-      fd_entry->fd = fd;
-      e = list_next(e);
-      break;
+      struct file_descriptor *fd_temp = list_entry (e, struct file_descriptor, elem); 
+      if (fd != fd_temp->fd)
+      {
+        file_descriptor->fd = fd;
+        e = list_next(e);
+        break;
+      }
+      ++fd;
     }
-    ++fd;
+    file_descriptor->fd = fd;
+    list_insert (e, &file_descriptor->elem);
+    return fd;
   }
-  fd_entry->fd = fd;
-  fd_entry->pid = thread_current ()->tid;
-  list_insert (e, &fd_entry->elem);
-  return fd_entry->fd;
+  return -1;
 }
 
 /* Returns the file associated with the given fd */
-static struct fd_entry*
-get_fd_entry (int fd)
+static struct file_descriptor*
+get_file_descriptor (int fd)
 {
-  struct list_elem *e;
-  for (e = list_begin (&fd_list); e != list_end (&fd_list); e = list_next (e))
+  struct process *process = thread_current ()->process;
+  if (process)
   {
-    struct fd_entry *fd_entry = list_entry (e, struct fd_entry, elem); 
-    if (fd_entry->fd == fd)
-      return fd_entry;
+    struct list *fd_map = &process->fd_map;
+    struct list_elem *e;
+    for (e = list_begin (fd_map); e != list_end (fd_map); e = list_next (e))
+    {
+      struct file_descriptor *file_descriptor = list_entry (e, struct file_descriptor, elem); 
+      if (file_descriptor->fd == fd)
+        return file_descriptor;
+    }
   }
   return NULL;
 }
@@ -90,17 +96,22 @@ get_fd_entry (int fd)
 static void
 clean_fds (pid_t pid)
 {
-  struct list_elem *e;
-  for (e = list_begin (&fd_list); e != list_end (&fd_list); e = list_next (e))
+  struct process *process = thread_current ()->process;
+  if (process)
   {
-    struct fd_entry *fd_entry = list_entry (e, struct fd_entry, elem); 
-    if (fd_entry->pid == pid)
+    struct list *fd_map = &process->fd_map;
+    struct list_elem *e;
+    for (e = list_begin (fd_map); e != list_end (fd_map); e = list_next (e))
     {
-      struct list_elem *temp = list_prev (e);
-      list_remove (e);
-      e = temp;
-      file_close (fd_entry->file);
-      free (fd_entry);
+      struct file_descriptor *file_descriptor = list_entry (e, struct file_descriptor, elem); 
+      if (process->pid == pid)
+      {
+        struct list_elem *temp = list_prev (e);
+        list_remove (e);
+        e = temp;
+        file_close (file_descriptor->file);
+        free (file_descriptor);
+      }
     }
   }
 }
@@ -151,7 +162,7 @@ exit (int status)
   /* Update the processes exit status. This status will persist after
    * this process is terminating in case the parent process wants
    * to retrieve it */
-  struct process *process = get_process (thread_current ()->tid);
+  struct process *process = thread_current ()->process;
   if (process)
   {
     process->status = status;
@@ -159,7 +170,7 @@ exit (int status)
   }
 
   /* Error message for passing test cases */
-  printf("%s: exit(%d)\n", thread_current ()->file_name, status);
+  printf("%s: exit(%d)\n", process->file_name, status);
 
   /* Terminate the thread */
   thread_exit ();
@@ -174,7 +185,7 @@ exec (const char *cmd_line)
   struct thread *t = get_thread (tid);
   if (t)
   {
-    struct process *p = get_process (t->tid);
+    struct process *p = t->process;
     sema_down (t->loaded_sema);
     /* Only return the tid if the executable is loaded successfully */
     if (p && p->loaded_success)
@@ -213,9 +224,9 @@ open (const char *file)
 static int
 filesize (int fd)
 {
-  struct fd_entry *fd_entry = get_fd_entry (fd);
-  if (fd_entry && fd_entry->pid == thread_current ()->tid)
-    return file_length (fd_entry->file);
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  if (file_descriptor)
+    return file_length (file_descriptor->file);
   return -1;
 }
 
@@ -231,9 +242,9 @@ read (int fd, void *buffer, unsigned size)
     *(uint8_t *) buffer = input_getc();
     return 1;
   }
-  struct fd_entry *fd_entry = get_fd_entry (fd);
-  if (fd_entry && fd_entry->pid == thread_current ()->tid)
-    return file_read (fd_entry->file, buffer, size); 
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  if (file_descriptor)
+    return file_read (file_descriptor->file, buffer, size); 
   return -1;
 }
 
@@ -247,37 +258,37 @@ write (int fd, const void *buffer, unsigned size)
     putbuf (buffer, size);
     return size;
   }
-  struct fd_entry *fd_entry = get_fd_entry (fd);
-  if (fd_entry && fd_entry->pid == thread_current ()->tid)
-    return file_write (fd_entry->file, buffer, size);  
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  if (file_descriptor)
+    return file_write (file_descriptor->file, buffer, size);  
   return 0;
 }
 
 static void
 seek (int fd, unsigned position)
 {
-  struct fd_entry *fd_entry = get_fd_entry(fd);
-  if (fd_entry && fd_entry->pid == thread_current ()->tid)
-    file_seek (fd_entry->file, position);
+  struct file_descriptor *file_descriptor = get_file_descriptor(fd);
+  if (file_descriptor)
+    file_seek (file_descriptor->file, position);
 }
 
 static unsigned
 tell (int fd)
 {
-  struct fd_entry *fd_entry = get_fd_entry(fd);
-  if (fd_entry && fd_entry->pid == thread_current ()->tid)
-    return file_tell (fd_entry->file);
+  struct file_descriptor *file_descriptor = get_file_descriptor(fd);
+  if (file_descriptor)
+    return file_tell (file_descriptor->file);
   return -1;
 }
 
 static void
 close (int fd)
 {
-  struct fd_entry *fd_entry = get_fd_entry(fd);
-  if (fd_entry && fd_entry->pid == thread_current ()->tid)
+  struct file_descriptor *file_descriptor = get_file_descriptor(fd);
+  if (file_descriptor)
   {
-    list_remove (&fd_entry->elem);
-    file_close (fd_entry->file);
+    list_remove (&file_descriptor->elem);
+    file_close (file_descriptor->file);
   }
 }
 

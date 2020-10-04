@@ -1,4 +1,3 @@
-#include "userprog/process.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
@@ -18,12 +17,13 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/process.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
 /* Get exit status entry for the given pid */
-struct process *
+static struct process *
 get_process (pid_t pid)
 {
   struct list_elem *e;
@@ -92,11 +92,15 @@ process_execute (const char *file_name)
     process->status = -1;
     process->parent_pid = thread_current ()->tid;
     process->is_waited_on = false;
+    list_init (&process->fd_map);
     list_push_back (&process_list, &process->elem);
   }
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  struct thread *t = get_thread (tid);
+  if (t)
+    t->process = process;
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   else
@@ -137,7 +141,7 @@ start_process (void *file_name_)
 
   /* Copy string to thread to be used in the exit message.
    * Needed to past test cases */
-  strlcpy (thread_current ()->file_name, file_name, MAX_CHARS);
+  strlcpy (thread_current ()->process->file_name, file_name, MAX_CHARS);
   
   /* If load failed, quit. */
   palloc_free_page (file_name_);
@@ -225,9 +229,14 @@ void
 process_exit (void)
 {
   struct thread *cur = thread_current ();
-  clean_child_processes (cur->tid);
-  if (cur->executable)
-    file_close (cur->executable);
+  struct process *p = cur->process;
+  if (p)
+  {
+    clean_child_processes (p->pid);
+    if (p->executable)
+      file_close (p->executable);
+  }
+
   uint32_t *pd;
 
   /* Destroy the current process's page directory and switch back
@@ -446,11 +455,15 @@ load (const char *file_name, void (**eip) (void), void **esp)
  {
   /* We arrive here whether the load is successful or not. */
   struct thread *cur = thread_current();
-  get_process (cur->tid)->loaded_success = success;
-  if (file)
+  struct process *p = thread_current ()->process;
+  if (p)
   {
-    cur->executable = file;
-    file_deny_write (file);
+    p->loaded_success = success;
+    if (file)
+    {
+      p->executable = file;
+      file_deny_write (file);
+    }
   }
   sema_up (cur->loaded_sema);
   return success;
