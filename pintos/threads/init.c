@@ -28,6 +28,7 @@
 #include "userprog/gdt.h"
 #include "userprog/syscall.h"
 #include "userprog/tss.h"
+#include "vm/frame.h"
 #else
 #include "tests/threads/tests.h"
 #endif
@@ -95,6 +96,7 @@ main (void)
           init_ram_pages * PGSIZE / 1024);
 
   /* Initialize memory system. */
+  falloc_init ();
   palloc_init (user_page_limit);
   malloc_init ();
   paging_init ();
