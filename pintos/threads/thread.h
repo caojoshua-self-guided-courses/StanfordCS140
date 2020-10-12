@@ -102,8 +102,8 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
-    struct process *process;            /* Process this thread is urnning,
-                                           null if none */
+    struct process *process;            /* Process this thread is running,
+                                           null if none. */
 #endif
 
     /* Owned by timer.c */

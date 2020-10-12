@@ -1,6 +1,7 @@
 #ifndef USERPROG_PROCESS_H
 #define USERPROG_PROCESS_H
 
+#include "lib/kernel/hash.h"
 #include "threads/thread.h"
 
 /* Process identifier. */
@@ -24,6 +25,7 @@ struct process
   bool loaded_success;
   bool is_waited_on;
   struct list fd_map;
+	struct hash spage_table;		/* Supplemental page table. */
   struct list_elem elem;
 };
 
@@ -35,5 +37,6 @@ tid_t process_execute (const char *file_name);
 int process_wait (tid_t);
 void process_exit (void);
 void process_activate (void);
+bool install_page (void *upage, void *kpage, bool writable);
 
 #endif /* userprog/process.h */
