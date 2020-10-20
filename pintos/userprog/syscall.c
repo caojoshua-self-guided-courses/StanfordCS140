@@ -10,8 +10,9 @@
 #include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-#include "userprog/pagedir.h"
+/* #include "userprog/pagedir.h" */
 #include "userprog/process.h"
+#include "vm/page.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -121,8 +122,15 @@ clean_fds (pid_t pid)
 static void
 validate_uaddr (const void *uaddr)
 {
-  if (!uaddr || !is_user_vaddr(uaddr) ||
-    !pagedir_get_page(thread_current()->pagedir, uaddr))
+	/* First load the page, in case it was lazy loaded. */
+	/* TODO: Should just call page_exists, instead of loading the page. This
+	currently does not work because the supplemental page table is not
+	keeping track of stack pages. */
+	load_page_into_frame (uaddr);
+
+  if (!uaddr || !is_user_vaddr (uaddr) ||
+		/* !page_exists (uaddr)) */
+    !pagedir_get_page (thread_current()->pagedir, uaddr))
     exit (-1);
 }
 

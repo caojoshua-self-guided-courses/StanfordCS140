@@ -73,6 +73,16 @@ page_less (const struct hash_elem *a_, const struct hash_elem *b_,
     return a->vaddr < b->vaddr;
 }
 
+/* Checks if there is a supplemental page entry for user virtual address
+vaddr. */
+bool
+page_exists (const void *vaddr)
+{
+	if (page_lookup (vaddr))
+		return true;
+	return false;
+}
+
 /* Lazy load a segment from executable file. The file metadata will be
 stored into the process supplemental page table. */
 void
@@ -91,7 +101,6 @@ lazy_load_segment (void *vaddr, struct file *file, off_t ofs,
 		page->read_bytes = read_bytes;
 		page->zero_bytes = zero_bytes;
 		hash_insert (&process->spage_table, &page->hash_elem);	
-		load_page_into_frame (vaddr);
 	}
 }  
 
