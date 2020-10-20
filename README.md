@@ -14,6 +14,10 @@ Everything is run on docker. Run `sudo make docker-container`. This will mount t
 Adding some random tidbits here because I'm too lazy to create design docs.
 
 ### Project 2 User Programs
-* There was a bug in the assembly in `pintos/lib/user/syscall.c` that incorrectly pushed parameters onto the stack. This took FOREVER to fix, and is the only code that was not intended to be touched by the instructors but was changed anyway. See the comment in the top of the file for the fix. See [GCC inline assembly constraint docs](https://www.felixcloutier.com/documents/gcc-asm.html#constraints) to better understand the problem.
+* There was a bug in the assembly in `pintos/lib/user/syscall.c` that incorrectly pushed parameters onto the stack. This took FOREVER to fix, and is the only code that was not intended to be touched by the instructors but was changed anyway. See the comment in the top of the file for the fix. See [GCC inline assembly constraint docs](https://www.felixcloutier.com/documents/gcc-asm.html#constraints) to better understand the problem. UPDATE: apparently [some has found this bug before](https://github.com/saurvs/pintos/commit/ea904493370d2a752855cc93aad1e27b009dd917)
 * For simplicity, I am treating TID and PID the same. This is fine for the parent thread of a process, but this can break in multi-threaded processes eg. child thread of a process should still have the same PID, but my implementation uses its TID, which will be different from the parent TID. Pintos does not supported multi-threaded processes, so the implementation works for this project.
+
+### Project 3 Virtual memory
+On branch virtual-memory
+* [This commit](https://github.com/caojoshua/StanfordCS140/commit/3508297ed2873f495cdfa6e6776227bf78880c2f) introduces a workaround for syn-read and syn-write testcases. After introducing segment lazy-loading, when child processes attempt to access the file system, the root directory is empty. Forcing the parent process to wait after executing each child process fixes this probem. This could be a synchronization error, or some bug in the demand paging implementation. After understanding the filesys better, I should revert the workarounds and pass the testcases normally.
 
