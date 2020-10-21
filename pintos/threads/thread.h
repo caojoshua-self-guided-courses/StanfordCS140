@@ -109,9 +109,15 @@ struct thread
     /* Owned by timer.c */
     int64_t next_wakeup;                /* Schedule wakeup for sleeping thread */
 
-    /* Owned by thread.c and process.c */
+    /* Owned by thread.c and process.c. */
     struct semaphore *loaded_sema;           /* Loaded executable sema */
     struct semaphore *alive_sema;            /* Represents if thread is alive */
+
+    /* Owned by syscall.c, exception.c, and vaddr.h. */
+    void *esp;
+
+    /* Owned by page.c. */
+    unsigned stack_pages;
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
@@ -156,5 +162,6 @@ int thread_get_load_avg (void);
 struct thread *list_highest_priority_thread(struct list *);
 
 struct thread *get_thread (tid_t tid);
+void *get_stack_bottom (void);
 
 #endif /* threads/thread.h */

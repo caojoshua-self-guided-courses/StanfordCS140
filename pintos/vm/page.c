@@ -10,6 +10,9 @@
  * to store data that cannot be stored in the hardware page table, which has
  * format restrictions. */
 
+/* Maximum number of stack pages. 4kb * 2000 = 8mb */
+#define MAX_STACK_PAGES 2000
+
 struct page;
 static bool load_page_from_filesys (struct page *page);
 
@@ -81,6 +84,52 @@ page_exists (const void *vaddr)
 	if (page_lookup (vaddr))
 		return true;
 	return false;
+}
+
+/* Allocates a new page under the bottom of the stack of the current thread. */
+void *
+stack_page_alloc (void) 
+{
+	void *kaddr = page_alloc (get_stack_bottom() - PGSIZE);
+  if (kaddr)
+  {
+    ++thread_current ()->stack_pages; 
+  }
+  return kaddr;
+}
+
+/* Allocates pages under the stack until virtual address vaddr is loaded into
+ * a frame. */
+void *
+stack_page_alloc_multiple (void *vaddr)
+{
+  ASSERT (vaddr < PHYS_BASE && vaddr >= MIN_STACK_ADDRESS);
+
+  void *stack_bottom = get_stack_bottom ();
+  while (vaddr < stack_bottom)
+  {
+    if (!stack_page_alloc ())
+      return NULL;
+    stack_bottom = get_stack_bottom ();
+  }
+  return stack_bottom;
+}
+
+/* Allocates a user page with that contains virtual address vaddr. Allocates a 
+ * frame and loads the page into the frame. Returns the base kernel virtual 
+ * address of the page. */
+void *
+page_alloc (void *vaddr)
+{
+  vaddr = pg_round_down (vaddr);
+  uint8_t *kaddr = falloc (PAL_USER | PAL_ZERO); 
+  if (kaddr)
+  {
+    if (!install_page (vaddr, kaddr, true))
+      return NULL;
+  }
+  /* return NULL; */
+  return kaddr;
 }
 
 /* Lazy load a segment from executable file. The file metadata will be

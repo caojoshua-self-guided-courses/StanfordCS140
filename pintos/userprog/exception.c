@@ -5,6 +5,7 @@
 #include "userprog/syscall.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
 #include "vm/page.h"
 
 /* Number of page faults processed. */
@@ -129,6 +130,8 @@ page_fault (struct intr_frame *f)
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
 
+  thread_current ()->esp = f->esp;
+
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
      data.  It is not necessarily the address of the instruction
@@ -152,7 +155,16 @@ page_fault (struct intr_frame *f)
 
 	bool success = false;
 	if (not_present && user)
-		success = load_page_into_frame (fault_addr);
+  {
+    /* Allocate a new page if the fault occured during a stack access. */
+    if (is_unallocated_stack_access (fault_addr))
+      success = stack_page_alloc_multiple (fault_addr);
+
+    /* For other page faults, we attempt to load the page from swap or
+     * disk. */
+    else
+      success = load_page_into_frame (fault_addr);
+  }
 
 	if (success)
 		return;

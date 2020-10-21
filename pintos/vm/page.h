@@ -9,6 +9,9 @@ bool page_less (const struct hash_elem *a_, const struct hash_elem *b_,
     void *aux);
 
 bool page_exists (const void *vaddr);
+void *stack_page_alloc (void);
+void *stack_page_alloc_multiple (void *vaddr);
+void *page_alloc (void *vaddr);
 void lazy_load_segment (void *vaddr, struct file *file, off_t ofs,
 	uint32_t read_bytes, uint32_t zero_bytes, bool writable);
 bool load_page_into_frame (const void *vaddr);

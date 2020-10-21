@@ -10,7 +10,6 @@
 #include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-/* #include "userprog/pagedir.h" */
 #include "userprog/process.h"
 #include "vm/page.h"
 
@@ -120,7 +119,7 @@ clean_fds (pid_t pid)
 /* Validate uaddr as a user address. If uaddr is not valid
  * terminate the thread */
 static void
-validate_uaddr (const void *uaddr)
+validate_uaddr (void *uaddr)
 {
 	/* First load the page, in case it was lazy loaded. */
 	/* TODO: Should just call page_exists, instead of loading the page. This
@@ -128,15 +127,17 @@ validate_uaddr (const void *uaddr)
 	keeping track of stack pages. */
 	load_page_into_frame (uaddr);
 
-  if (!uaddr || !is_user_vaddr (uaddr) ||
+  if (!uaddr || 
+    !is_user_vaddr(uaddr) ||
+    (is_unallocated_stack_access (uaddr) && !stack_page_alloc_multiple (uaddr)) ||
 		/* !page_exists (uaddr)) */
-    !pagedir_get_page (thread_current()->pagedir, uaddr))
+    !pagedir_get_page(thread_current()->pagedir, uaddr))
     exit (-1);
 }
 
 /* Validate the number of args above esp on the stack */
 static void
-validate_args (const void *esp, unsigned args)
+validate_args (void *esp, unsigned args)
 {
   for (unsigned i = 0; i <= args; ++i)
     validate_uaddr (esp + (i * 4));
@@ -144,7 +145,7 @@ validate_args (const void *esp, unsigned args)
 
 /* Validates the first and last bytes in a string */
 static void
-validate_string (const void *string)
+validate_string (void *string)
 {
   validate_uaddr (string);
   validate_uaddr (string + strlen (string));
@@ -185,7 +186,7 @@ exit (int status)
 }
 
 static pid_t
-exec (const char *cmd_line)
+exec (char *cmd_line)
 {
   validate_string (cmd_line);
 
@@ -209,21 +210,21 @@ wait (pid_t pid)
 }
 
 static bool
-create (const char *file, unsigned initial_size)
+create (char *file, unsigned initial_size)
 {
   validate_string (file);
   return filesys_create (file, initial_size); 
 }
 
 static bool
-remove (const char *file)
+remove (char *file)
 {
   validate_string (file);
   return filesys_remove (file);
 }
 
 static int
-open (const char *file)
+open (char *file)
 {
   validate_string (file);
   return create_fd (file);
@@ -257,7 +258,7 @@ read (int fd, void *buffer, unsigned size)
 }
 
 static int
-write (int fd, const void *buffer, unsigned size)
+write (int fd, void *buffer, unsigned size)
 {
   validate_uaddr (buffer);
   validate_uaddr (buffer + size);
@@ -304,6 +305,7 @@ static void
 syscall_handler (struct intr_frame *f) 
 {
   void *esp = f->esp;
+  thread_current ()->esp = esp;
   validate_uaddr (esp);
   
   uint32_t sys_call_num = *(int *) esp;
@@ -318,7 +320,7 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_EXEC:
       validate_args (esp, 1);
-      f->eax = exec (*(const char **)(esp + 4));
+      f->eax = exec (*(char **)(esp + 4));
       break;
     case SYS_WAIT:
       validate_args (esp, 1);
@@ -326,15 +328,15 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_CREATE:
       validate_args (esp, 2);
-      f->eax = create (*(const char **)(esp + 4), *(int *)(esp + 8));
+      f->eax = create (*(char **)(esp + 4), *(int *)(esp + 8));
       break;
     case SYS_REMOVE:
       validate_args (esp, 1);
-      f->eax = remove (*(const char **)(esp + 4));
+      f->eax = remove (*(char **)(esp + 4));
       break;
     case SYS_OPEN:
       validate_args (esp, 1);
-      f->eax = open (*(const char **)(esp + 4));
+      f->eax = open (*(char **)(esp + 4));
       break;
     case SYS_FILESIZE:
       validate_args (esp, 1);
