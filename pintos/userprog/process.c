@@ -17,6 +17,7 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/syscall-file.h"
 #include "userprog/process.h"
 #include "vm/frame.h"
 #include "vm/page.h"
@@ -95,6 +96,7 @@ process_execute (const char *file_name)
     process->parent_pid = thread_current ()->tid;
     process->is_waited_on = false;
     list_init (&process->fd_map);
+    hash_init (&process->mapid_map, mapid_hash, mapid_less, NULL);
 		hash_init (&process->spage_table, page_hash, page_less, NULL); 
     list_push_back (&process_list, &process->elem);
   }

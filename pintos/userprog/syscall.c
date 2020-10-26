@@ -11,109 +11,16 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/process.h"
+#include "userprog/syscall-file.h"
 #include "vm/page.h"
 
 static void syscall_handler (struct intr_frame *);
-
-/* Min fd. fd 0 and fd 1 are reserved for stdin and stdout 
- * respectively. */
-static const int MIN_FD = 2;
-
-/* Elements of process->fd_map that map fd to files */
-struct file_descriptor
-{
-  int fd;
-  struct file *file;
-  struct list_elem elem;
-};
 
 /* register syscall_handler for interrupts */
 void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
-}
-
-/* Create and return a new file descriptor. */
-static int
-create_fd (const char *file_name)
-{
-  if (!file_name)
-    return -1;
-  struct file *file = filesys_open (file_name);
-  if (!file)
-    return -1;
-
-  struct process *process = thread_current ()->process;
-  if (process)
-  {
-    int fd = MIN_FD;
-    struct list *fd_map = &process->fd_map;
-
-    struct file_descriptor *file_descriptor = malloc (sizeof (struct file_descriptor));
-    file_descriptor->file = file;
-
-    /* Iterate through the fd list until there is an open fd */
-    struct list_elem *e; 
-    for (e = list_begin (fd_map); e != list_end (fd_map); e = list_next (e))
-    {
-      struct file_descriptor *fd_temp = list_entry (e, struct file_descriptor, elem); 
-      if (fd != fd_temp->fd)
-      {
-        file_descriptor->fd = fd;
-        e = list_next(e);
-        break;
-      }
-      ++fd;
-    }
-    file_descriptor->fd = fd;
-    list_insert (e, &file_descriptor->elem);
-    return fd;
-  }
-  return -1;
-}
-
-/* Returns the file associated with the given fd */
-static struct file_descriptor*
-get_file_descriptor (int fd)
-{
-  struct process *process = thread_current ()->process;
-  if (process)
-  {
-    struct list *fd_map = &process->fd_map;
-    struct list_elem *e;
-    for (e = list_begin (fd_map); e != list_end (fd_map); e = list_next (e))
-    {
-      struct file_descriptor *file_descriptor = list_entry (e, struct file_descriptor, elem); 
-      if (file_descriptor->fd == fd)
-        return file_descriptor;
-    }
-  }
-  return NULL;
-}
-
-/* Cleans FDs with given pid */
-static void
-clean_fds (pid_t pid)
-{
-  struct process *process = thread_current ()->process;
-  if (process)
-  {
-    struct list *fd_map = &process->fd_map;
-    struct list_elem *e;
-    for (e = list_begin (fd_map); e != list_end (fd_map); e = list_next (e))
-    {
-      struct file_descriptor *file_descriptor = list_entry (e, struct file_descriptor, elem); 
-      if (process->pid == pid)
-      {
-        struct list_elem *temp = list_prev (e);
-        list_remove (e);
-        e = temp;
-        file_close (file_descriptor->file);
-        free (file_descriptor);
-      }
-    }
-  }
 }
 
 /* Validate uaddr as a user address. If uaddr is not valid
@@ -301,6 +208,41 @@ close (int fd)
   }
 }
 
+static int
+mmap (int fd, void *addr)
+{
+  ASSERT (pg_ofs (addr) == 0);
+
+  struct mapid_entry *mapid_entry = create_mapid (fd, addr);
+  if (mapid_entry)
+  {
+    struct file* file = get_file_descriptor (fd)->file;
+    int len = file_length (file);
+    int ofs = 0;
+
+    /* Lazy load a page in each loop iteration. */
+    while (ofs < len)
+    {
+      /* Only read the remaining bytes for the last page. */
+      int bytes_left = len - ofs;
+      int page_read_bytes = bytes_left > PGSIZE ? PGSIZE : bytes_left;
+
+      lazy_load_segment (addr, file, ofs, page_read_bytes,
+          PGSIZE - page_read_bytes, true);
+      addr += PGSIZE;
+      ofs += PGSIZE;
+    }
+    return mapid_entry->mapid;
+  }
+  return -1;
+}
+
+static void
+munmap (int mapid)
+{
+  remove_mapid (mapid);
+}
+
 static void
 syscall_handler (struct intr_frame *f) 
 {
@@ -363,6 +305,14 @@ syscall_handler (struct intr_frame *f)
     case SYS_CLOSE:
       validate_args (esp, 1);
       close(*(int *)(esp + 4));
+      break;
+    case SYS_MMAP:
+      validate_args (esp, 2);
+      f->eax = mmap (*(int *)(esp + 4), *(void **)(esp + 8));
+      break;
+    case SYS_MUNMAP:
+      validate_args (esp, 1);
+      munmap (*(int *)(esp + 4));
       break;
     default:
       thread_exit();

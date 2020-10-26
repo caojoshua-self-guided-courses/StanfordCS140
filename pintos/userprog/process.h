@@ -25,6 +25,7 @@ struct process
   bool loaded_success;
   bool is_waited_on;
   struct list fd_map;
+  struct hash mapid_map;
 	struct hash spage_table;		/* Supplemental page table. */
   struct list_elem elem;
 };
