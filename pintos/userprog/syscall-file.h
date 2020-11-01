@@ -25,7 +25,7 @@ struct mapid_entry
 
 /* File descriptor functions. */
 int create_fd (const char *file_name);
-void clean_fds (pid_t pid);
+void clean_fds (void);
 struct file_descriptor* get_file_descriptor (int fd);
 
 /* Map ID functions. */

@@ -6,10 +6,14 @@
 #include "filesys/filesys.h"
 #include "threads/malloc.h"
 #include "threads/vaddr.h"
+#include "vm/page.h"
 
 /* Min fd. fd 0 and fd 1 are reserved for stdin and stdout
  * respectively. */
 static const int MIN_FD = 2;
+
+static void mapid_destructor (struct hash_elem *hash_elem, void *aux UNUSED);
+static void internal_remove_mapid (struct mapid_entry *mapid_entry);
 
 /***** File Descriptor *****/
 
@@ -52,9 +56,9 @@ create_fd (const char *file_name)
   return -1;
 }
 
-/* Cleans FDs with given pid */
+/* Clean fds of current process. */
 void
-clean_fds (pid_t pid)
+clean_fds (void)
 {
   struct process *process = thread_current ()->process;
   if (process)
@@ -64,14 +68,11 @@ clean_fds (pid_t pid)
     for (e = list_begin (fd_map); e != list_end (fd_map); e = list_next (e))
     {
       struct file_descriptor *file_descriptor = list_entry (e, struct file_descriptor, elem);
-      if (process->pid == pid)
-      {
-        struct list_elem *temp = list_prev (e);
-        list_remove (e);
-        e = temp;
-        file_close (file_descriptor->file);
-        free (file_descriptor);
-      }
+      struct list_elem *temp = list_prev (e);
+      list_remove (e);
+      e = temp;
+      file_close (file_descriptor->file);
+      free (file_descriptor);
     }
   }
 }
@@ -164,8 +165,7 @@ create_mapid (int fd, void* addr)
   return NULL;
 }
 
-/* Removes a mapid from the current processes mapid_table. Write the mapped
- * pages to the file and free the mapid_entry. */
+/* Remove a mapid and clean all related resources. */
 void
 remove_mapid (int mapid)
 {
@@ -173,31 +173,62 @@ remove_mapid (int mapid)
   struct mapid_entry *mapid_entry = mapid_lookup (mapid);
   if (mapid_entry)
   {
-    /* Write the mmap page contents to kernel space first, then write it to
-     * to disk. This is to avoid page faults, which must not occure during
-     * filesys access. Page faults can occur if a mmap page is not in memory.
-     * TODO: find a better way to avoid page faults without doing a full
-     * malloc/memcpy. This way is costly, and doesn't fully ensure that the
-     * contents will be in memory. */
-    void *file_contents = malloc (mapid_entry->length);
-    memcpy (file_contents, mapid_entry->addr, mapid_entry->length);
-    int size = file_write_at (mapid_entry->file, file_contents, mapid_entry->length, 0);
-    free (file_contents);
+    if (process)
+      hash_delete (&process->mapid_map, &mapid_entry->hash_elem);
 
-    /* No requirement listed to set the file position back to 0, but test
-     * cases imply so. */
-    file_seek (mapid_entry->file, 0);
-
-    /* Free pages. */
-    void *addr = pg_round_down (mapid_entry->addr);
-    void *end_addr = mapid_entry->addr + mapid_entry->length;
-    while (addr <= end_addr)
-    {
-      page_free (addr);
-      addr += PGSIZE;
-    }
-
-    hash_delete (&process->mapid_map, &mapid_entry->hash_elem);
-    free (mapid_entry);
+    internal_remove_mapid (mapid_entry);
   }
+}
+
+/* Clean mapids of current process. Should call this on process exit. */
+void
+clean_mapids (void)
+{
+  struct process *p = thread_current ()->process;
+  if (p)
+    hash_destroy (&p->mapid_map, mapid_destructor);
+}
+
+/* Mapid destructor passed into hash_destroy. */
+static void
+mapid_destructor (struct hash_elem *hash_elem, void *aux UNUSED)
+{
+  struct mapid_entry *mapid_entry = hash_entry (hash_elem, struct mapid_entry, hash_elem);
+  if (mapid_entry)
+    internal_remove_mapid (mapid_entry);
+}
+
+/* Clean mapid_entry resources, and write its pages to disk. */
+static void
+internal_remove_mapid (struct mapid_entry *mapid_entry)
+{
+  ASSERT (mapid_entry);
+
+  /* Write the mmap page contents to kernel space first, then write it to
+   * to disk. This is to avoid page faults, which must not occure during
+   * filesys access. Page faults can occur if a mmap page is not in memory.
+   * TODO: find a better way to avoid page faults without doing a full
+   * malloc/memcpy. This way is costly, and doesn't fully ensure that the
+   * contents will be in memory.
+   * TODO: can consider only writing the page if its dirty. Will require
+   * checking pages individually. */
+  void *file_contents = malloc (mapid_entry->length);
+  memcpy (file_contents, mapid_entry->addr, mapid_entry->length);
+  file_write_at (mapid_entry->file, file_contents, mapid_entry->length, 0);
+  free (file_contents);
+
+  /* No requirement listed to set the file position back to 0, but test
+   * cases imply so. */
+  file_seek (mapid_entry->file, 0);
+
+  /* Free pages. */
+  void *addr = pg_round_down (mapid_entry->addr);
+  void *end_addr = mapid_entry->addr + mapid_entry->length;
+  while (addr <= end_addr)
+  {
+    page_free (addr);
+    addr += PGSIZE;
+  }
+
+  free (mapid_entry);
 }

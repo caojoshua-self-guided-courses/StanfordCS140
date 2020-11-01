@@ -4,7 +4,7 @@
 #include "threads/malloc.h"
 #include "threads/thread.h"
 
-struct frame *get_frame (void *page);
+struct frame *get_frame (void *kpage);
 
 /* Contains one entry for each frame that contains a user page */
 struct list frame_table;
@@ -24,7 +24,9 @@ struct frame *get_frame (void *kpage)
   {
     struct frame *frame = list_entry (e, struct frame, elem);
     if (frame->kpage == kpage)
+    {
       return frame;
+    }
   }
   return NULL;
 }
@@ -59,6 +61,7 @@ ffree (void *kpage)
   struct frame *frame = get_frame(kpage);
   if (frame) {
     palloc_free_page (frame->kpage);
+    list_remove (&frame->elem);
     free (frame);
   }
 }

@@ -82,7 +82,8 @@ exit (int status)
   if (process)
   {
     process->status = status;
-    clean_fds (process->pid);
+    clean_mapids ();
+    clean_fds ();
   }
 
   /* Error message for passing test cases */
