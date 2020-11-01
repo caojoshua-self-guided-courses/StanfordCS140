@@ -10,20 +10,20 @@ struct frame *get_frame (void *page);
 struct list frame_table;
 
 struct frame {
-  void *page;
+  void *kpage;
   struct thread *thread;
   struct list_elem elem;
 };
 
 /* Returns the frame that is pointed to by page */
-struct frame *get_frame (void *page)
+struct frame *get_frame (void *kpage)
 {
   struct list_elem *e;
   for (e = list_begin (&frame_table); e != list_end (&frame_table); 
       e = list_next (e))
   {
     struct frame *frame = list_entry (e, struct frame, elem);
-    if (frame->page == page)
+    if (frame->kpage == kpage)
       return frame;
   }
   return NULL;
@@ -39,25 +39,26 @@ falloc_init (void) {
 void *
 falloc (enum palloc_flags flags)
 {
-  void *page = palloc_get_page (flags);
-  if (page)
+  void *kpage = palloc_get_page (flags);
+  if (kpage)
   {
     struct frame *frame = malloc (sizeof (frame));
-    frame->page = page;
+    frame->kpage = kpage;
     list_push_back (&frame_table, &frame->elem);
-    return page;
+    return kpage;
   }
 
   // TODO: evict a page if none are available
-  return page;
+  return kpage;
 }
 
 /* Frees a frame. */
 void
-ffree (void *page)
+ffree (void *kpage)
 {
-  struct frame *frame = get_frame(page);
-  if (frame)
-   free (frame);
-  palloc_free_page (frame);
+  struct frame *frame = get_frame(kpage);
+  if (frame) {
+    palloc_free_page (frame->kpage);
+    free (frame);
+  }
 }

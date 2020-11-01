@@ -1,6 +1,7 @@
 #include "userprog/syscall-file.h"
 #include <debug.h>
 #include <stdbool.h>
+#include <string.h>
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "threads/malloc.h"
@@ -172,10 +173,30 @@ remove_mapid (int mapid)
   struct mapid_entry *mapid_entry = mapid_lookup (mapid);
   if (mapid_entry)
   {
-    file_write_at (mapid_entry->file, mapid_entry->addr, mapid_entry->length, 0);
+    /* Write the mmap page contents to kernel space first, then write it to
+     * to disk. This is to avoid page faults, which must not occure during
+     * filesys access. Page faults can occur if a mmap page is not in memory.
+     * TODO: find a better way to avoid page faults without doing a full
+     * malloc/memcpy. This way is costly, and doesn't fully ensure that the
+     * contents will be in memory. */
+    void *file_contents = malloc (mapid_entry->length);
+    memcpy (file_contents, mapid_entry->addr, mapid_entry->length);
+    int size = file_write_at (mapid_entry->file, file_contents, mapid_entry->length, 0);
+    free (file_contents);
+
     /* No requirement listed to set the file position back to 0, but test
      * cases imply so. */
     file_seek (mapid_entry->file, 0);
+
+    /* Free pages. */
+    void *addr = pg_round_down (mapid_entry->addr);
+    void *end_addr = mapid_entry->addr + mapid_entry->length;
+    while (addr <= end_addr)
+    {
+      page_free (addr);
+      addr += PGSIZE;
+    }
+
     hash_delete (&process->mapid_map, &mapid_entry->hash_elem);
     free (mapid_entry);
   }

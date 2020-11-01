@@ -154,15 +154,16 @@ page_fault (struct intr_frame *f)
   user = (f->error_code & PF_U) != 0;
 
 	bool success = false;
-	if (not_present && user)
+  // TODO: allow page faults when kernel is accessing user memory
+	if (not_present)
   {
-    /* Allocate a new page if the fault occured during a stack access. */
-    if (is_unallocated_stack_access (fault_addr))
+    /* Allocate a new page if the fault occured during a user stack access. */
+    if (user && is_unallocated_stack_access (fault_addr))
       success = stack_page_alloc_multiple (fault_addr);
 
-    /* For other page faults, we attempt to load the page from swap or
-     * disk. */
-    else
+    /* Attempt to load the page from filesys or swap if its a user address.
+     * The fault may still occur from the kernel if its in a syscall. */
+    else if (is_user_vaddr (fault_addr))
       success = load_page_into_frame (fault_addr);
   }
 

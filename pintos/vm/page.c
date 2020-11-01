@@ -14,7 +14,11 @@
 #define MAX_STACK_PAGES 2000
 
 struct page;
+
 static bool load_page_from_filesys (struct page *page);
+static bool page_frame_alloc (struct page *page);
+static bool install_page (void *upage, void *kpage, bool writable);
+static void internal_page_free (struct page *page);
 
 /* Indicates where the page is. */
 enum page_present {
@@ -25,7 +29,8 @@ enum page_present {
 
 /* Page metadata to be stored in the supplemental page table. */
 struct page {
-  void *vaddr;
+  void *upage;  /* User virtual address. */
+  void *kpage;  /* Kernel virtual address. */
   struct process *process;
   enum page_present present;
   bool writable;
@@ -40,14 +45,32 @@ struct page {
 	uint32_t zero_bytes;
 };
 
-/* Looks up page with virtual address vaddr. */
+/* Returns a hash value for page p. */
+unsigned
+page_hash (const struct hash_elem *p_, void *aux UNUSED)
+{
+    const struct page *p = hash_entry (p_, struct page, hash_elem);
+    return hash_bytes (&p->upage, sizeof p->upage);
+}
+
+/* Returns true if page a precedes page b. */
+bool
+page_less (const struct hash_elem *a_, const struct hash_elem *b_,
+               void *aux UNUSED)
+{
+    const struct page *a = hash_entry (a_, struct page, hash_elem);
+    const struct page *b = hash_entry (b_, struct page, hash_elem);
+    return a->upage < b->upage;
+}
+
+/* Looks up page with user virtual address uaddr. */
 static struct page*
-page_lookup (const void *vaddr)
+page_lookup (const void *uaddr)
 {
 	struct page p;
   struct hash_elem *e;
 
-  p.vaddr = pg_round_down (vaddr);
+  p.upage = pg_round_down (uaddr);
 	struct process *cur = thread_current ()->process;
 	if (cur)
 	{
@@ -58,30 +81,12 @@ page_lookup (const void *vaddr)
 	return NULL;
 }
 
-/* Returns a hash value for page p. */
-unsigned
-page_hash (const struct hash_elem *p_, void *aux UNUSED)
-{
-    const struct page *p = hash_entry (p_, struct page, hash_elem);
-    return hash_bytes (&p->vaddr, sizeof p->vaddr);
-}
-
-/* Returns true if page a precedes page b. */
-bool
-page_less (const struct hash_elem *a_, const struct hash_elem *b_,
-               void *aux UNUSED)
-{
-    const struct page *a = hash_entry (a_, struct page, hash_elem);
-    const struct page *b = hash_entry (b_, struct page, hash_elem);
-    return a->vaddr < b->vaddr;
-}
-
 /* Checks if there is a supplemental page entry for user virtual address
-vaddr. */
+uaddr. */
 bool
-page_exists (const void *vaddr)
+page_exists (const void *uaddr)
 {
-	if (page_lookup (vaddr))
+	if (page_lookup (uaddr))
 		return true;
 	return false;
 }
@@ -90,23 +95,29 @@ page_exists (const void *vaddr)
 void *
 stack_page_alloc (void) 
 {
-	void *kaddr = page_alloc (get_stack_bottom() - PGSIZE);
-  if (kaddr)
+  struct page *page = malloc (sizeof (struct page));
+  if (page)
   {
-    ++thread_current ()->stack_pages; 
+    page->upage = get_stack_bottom () - PGSIZE;
+    page->writable = true;
+    if (page_frame_alloc (page))
+    {
+      ++thread_current ()->stack_pages; 
+    }
+    return page->kpage;
   }
-  return kaddr;
+  return NULL;
 }
 
-/* Allocates pages under the stack until virtual address vaddr is loaded into
- * a frame. */
+/* Allocates pages under the stack until user virtual address uaddr is loaded 
+ * into a frame. */
 void *
-stack_page_alloc_multiple (void *vaddr)
+stack_page_alloc_multiple (void *uaddr)
 {
-  ASSERT (vaddr < PHYS_BASE && vaddr >= MIN_STACK_ADDRESS);
+  ASSERT (uaddr < PHYS_BASE && uaddr >= MIN_STACK_ADDRESS);
 
   void *stack_bottom = get_stack_bottom ();
-  while (vaddr < stack_bottom)
+  while (uaddr < stack_bottom)
   {
     if (!stack_page_alloc ())
       return NULL;
@@ -115,27 +126,19 @@ stack_page_alloc_multiple (void *vaddr)
   return stack_bottom;
 }
 
-/* Allocates a user page with that contains virtual address vaddr. Allocates a 
- * frame and loads the page into the frame. Returns the base kernel virtual 
- * address of the page. */
-void *
-page_alloc (void *vaddr)
+/* Frees a page with base user virtual address uaddr. */
+void
+page_free (void *uaddr)
 {
-  vaddr = pg_round_down (vaddr);
-  uint8_t *kaddr = falloc (PAL_USER | PAL_ZERO); 
-  if (kaddr)
-  {
-    if (!install_page (vaddr, kaddr, true))
-      return NULL;
-  }
-  /* return NULL; */
-  return kaddr;
+  struct page *page = page_lookup (uaddr);
+  if (page)
+    internal_page_free (page);
 }
 
 /* Lazy load a segment from executable file. The file metadata will be
 stored into the process supplemental page table. */
 void
-lazy_load_segment (void *vaddr, struct file *file, off_t ofs,
+lazy_load_segment (void *uaddr, struct file *file, off_t ofs,
 										uint32_t read_bytes, uint32_t zero_bytes, bool writable)
 {
 	struct process *process = thread_current ()->process;
@@ -143,7 +146,7 @@ lazy_load_segment (void *vaddr, struct file *file, off_t ofs,
 	{
 		struct page *page = malloc (sizeof (struct page));
 		page->present = PRESENT_FILESYS;
-		page->vaddr = vaddr;
+		page->upage = uaddr;
 		page->writable = writable;
 		page->file = file;
 		page->ofs = ofs;
@@ -153,13 +156,13 @@ lazy_load_segment (void *vaddr, struct file *file, off_t ofs,
 	}
 }  
 
-/* Looks up the page containing virtual address vaddr, and calls the helper
+/* Looks up the page containing user virtual address upage, and calls the helper
 function corresponding to where the page is located. Returns true if the page
 is successfully loaded, false otherwise. */
 bool
-load_page_into_frame (const void *vaddr)
+load_page_into_frame (const void *uaddr)
 {
-	struct page *page = page_lookup (vaddr);
+	struct page *page = page_lookup (uaddr);
 	if (page)
 	{
 		switch (page->present)
@@ -183,25 +186,63 @@ load_page_from_filesys (struct page *page)
 
 	file_seek (page->file, page->ofs);
 
-  /* Get a page of memory. */
-  uint8_t *kpage = falloc (PAL_USER);
-  if (kpage == NULL)
+  /* Get a page of memory and add it to the process's address space. */
+  if (!page_frame_alloc (page))
     return false;
 
   /* Load this page. */
-  if (file_read (page->file, kpage, page->read_bytes) != (int) page->read_bytes)
+  if (file_read (page->file, page->kpage, page->read_bytes) != (int) page->read_bytes)
   {
-    ffree (kpage);
+    internal_page_free (page);
     return false; 
   }
-  memset (kpage + page->read_bytes, 0, page->zero_bytes);
+  memset (page->kpage + page->read_bytes, 0, page->zero_bytes);
 
-  /* Add the page to the process's address space. */
-  if (!install_page (page->vaddr, kpage, page->writable)) 
-  {
-    free (kpage);
-    return false; 
-  }
   page->present = PRESENT_MEMORY;
   return true;
+}
+
+/* Allocates a frame for page. Return true if successful, false otherwise. */
+static bool
+page_frame_alloc (struct page *page)
+{
+  void *upage = pg_round_down (page->upage);
+  void *kpage = falloc (PAL_USER | PAL_ZERO); 
+  if (kpage && install_page (upage, kpage, page->writable))
+  {
+    page->kpage = kpage;
+    return true;
+  }
+  return false;
+}
+
+/* Adds a mapping from user virtual address UPAGE to kernel
+   virtual address KPAGE to the page table.
+   If WRITABLE is true, the user process may modify the page;
+   otherwise, it is read-only.
+   UPAGE must not already be mapped.
+   KPAGE should probably be a page obtained from the user pool
+   with palloc_get_page().
+   Returns true on success, false if UPAGE is already mapped or
+   if memory allocation fails. */
+static bool
+install_page (void *upage, void *kpage, bool writable)
+{
+  struct thread *t = thread_current ();
+
+  /* Verify that there's not already a page at that virtual
+     address, then map our page there. */
+  return (pagedir_get_page (t->pagedir, upage) == NULL
+          && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+/* Uninstall page from the current process's pagedir and free page. */
+static void
+internal_page_free (struct page *page)
+{
+  if (page)
+  {
+    pagedir_clear_page (thread_current ()->pagedir, page->upage);
+    ffree (page->kpage);
+  }
 }

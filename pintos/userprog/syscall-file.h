@@ -16,9 +16,10 @@ struct file_descriptor
 struct mapid_entry
 {
   int mapid;
+  int fd;
   struct file *file;
   void *addr;
-  int length;
+  unsigned length;
   struct hash_elem hash_elem;
 };
 
