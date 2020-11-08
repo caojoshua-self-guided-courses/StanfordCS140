@@ -145,7 +145,7 @@ create_mapid (int fd, void* addr)
 
   struct process *process = thread_current ()->process;
   struct file_descriptor *file_descriptor = get_file_descriptor (fd);
-  if (process && file_descriptor)
+  if (process && file_descriptor && file_length (file_descriptor->file) > 0)
   {
     /* Find an available mapid. */
     for (int i = 0; true; ++i)

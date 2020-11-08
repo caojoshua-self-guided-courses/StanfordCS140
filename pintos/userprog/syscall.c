@@ -212,7 +212,9 @@ close (int fd)
 static int
 mmap (int fd, void *addr)
 {
-  ASSERT (pg_ofs (addr) == 0);
+  if (!addr || pg_ofs (addr) != 0)
+    return -1;
+
   struct mapid_entry *mapid_entry = create_mapid (fd, addr);
   if (mapid_entry)
   {
