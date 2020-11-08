@@ -184,18 +184,20 @@ load_page_from_filesys (struct page *page)
 {
   ASSERT (page->present == PRESENT_FILESYS);
 
-	file_seek (page->file, page->ofs);
-
   /* Get a page of memory and add it to the process's address space. */
   if (!page_frame_alloc (page))
     return false;
 
   /* Load this page. */
+  int old_tell = file_tell (page->file);
+	file_seek (page->file, page->ofs);
   if (file_read (page->file, page->kpage, page->read_bytes) != (int) page->read_bytes)
   {
     internal_page_free (page);
+    file_seek (page->file, old_tell);
     return false; 
   }
+  file_seek (page->file, old_tell);
   memset (page->kpage + page->read_bytes, 0, page->zero_bytes);
 
   page->present = PRESENT_MEMORY;
@@ -240,9 +242,11 @@ install_page (void *upage, void *kpage, bool writable)
 static void
 internal_page_free (struct page *page)
 {
+  struct process *p = thread_current ()->process;
   if (page)
   {
     pagedir_clear_page (thread_current ()->pagedir, page->upage);
     ffree (page->kpage);
+    hash_delete (&p->spage_table, &page->hash_elem);
   }
 }

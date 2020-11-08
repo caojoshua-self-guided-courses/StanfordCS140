@@ -209,12 +209,23 @@ internal_remove_mapid (struct mapid_entry *mapid_entry)
    * filesys access. Page faults can occur if a mmap page is not in memory.
    * TODO: find a better way to avoid page faults without doing a full
    * malloc/memcpy. This way is costly, and doesn't fully ensure that the
-   * contents will be in memory.
-   * TODO: can consider only writing the page if its dirty. Will require
-   * checking pages individually. */
-  void *file_contents = malloc (mapid_entry->length);
-  memcpy (file_contents, mapid_entry->addr, mapid_entry->length);
-  file_write_at (mapid_entry->file, file_contents, mapid_entry->length, 0);
+   * contents will be in memory. */
+  file_seek (mapid_entry->file, 0);
+  void *addr = mapid_entry->addr;
+  int write_bytes = mapid_entry->length;
+  void *file_contents = malloc (PGSIZE);
+  while (write_bytes > 0)
+  {
+    if (pagedir_is_dirty (thread_current ()->pagedir, addr))
+    {
+      int page_write_bytes = write_bytes > PGSIZE ? PGSIZE : write_bytes;
+      memcpy (file_contents, addr, page_write_bytes);
+      file_write (mapid_entry->file, file_contents, page_write_bytes);
+    }
+
+    addr += PGSIZE;
+    write_bytes -= PGSIZE;
+  }
   free (file_contents);
 
   /* No requirement listed to set the file position back to 0, but test
@@ -222,7 +233,7 @@ internal_remove_mapid (struct mapid_entry *mapid_entry)
   file_seek (mapid_entry->file, 0);
 
   /* Free pages. */
-  void *addr = pg_round_down (mapid_entry->addr);
+  addr = pg_round_down (mapid_entry->addr);
   void *end_addr = mapid_entry->addr + mapid_entry->length;
   while (addr <= end_addr)
   {
