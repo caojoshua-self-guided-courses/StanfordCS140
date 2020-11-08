@@ -16,6 +16,7 @@
 struct page;
 
 static bool load_page_from_filesys (struct page *page);
+static void page_add_spage_table (struct page *page);
 static bool page_frame_alloc (struct page *page);
 static bool install_page (void *upage, void *kpage, bool writable);
 static void internal_page_free (struct page *page);
@@ -100,10 +101,15 @@ stack_page_alloc (void)
   {
     page->upage = get_stack_bottom () - PGSIZE;
     page->writable = true;
+    page_add_spage_table (page);
+
     if (page_frame_alloc (page))
-    {
       ++thread_current ()->stack_pages; 
+    else {
+      page_free (page);
+      return NULL;
     }
+
     return page->kpage;
   }
   return NULL;
@@ -141,19 +147,15 @@ void
 lazy_load_segment (void *uaddr, struct file *file, off_t ofs,
 										uint32_t read_bytes, uint32_t zero_bytes, bool writable)
 {
-	struct process *process = thread_current ()->process;
-	if (process)
-	{
-		struct page *page = malloc (sizeof (struct page));
-		page->present = PRESENT_FILESYS;
-		page->upage = uaddr;
-		page->writable = writable;
-		page->file = file;
-		page->ofs = ofs;
-		page->read_bytes = read_bytes;
-		page->zero_bytes = zero_bytes;
-		hash_insert (&process->spage_table, &page->hash_elem);	
-	}
+  struct page *page = malloc (sizeof (struct page));
+  page->present = PRESENT_FILESYS;
+  page->upage = uaddr;
+  page->writable = writable;
+  page->file = file;
+  page->ofs = ofs;
+  page->read_bytes = read_bytes;
+  page->zero_bytes = zero_bytes;
+  page_add_spage_table (page);
 }  
 
 /* Looks up the page containing user virtual address upage, and calls the helper
@@ -202,6 +204,15 @@ load_page_from_filesys (struct page *page)
 
   page->present = PRESENT_MEMORY;
   return true;
+}
+
+/* Adds page to the process's supplemental page table. */
+static void
+page_add_spage_table (struct page *page)
+{
+  struct process *p = thread_current ()->process;
+  if (p)
+		hash_insert (&p->spage_table, &page->hash_elem);	
 }
 
 /* Allocates a frame for page. Return true if successful, false otherwise. */

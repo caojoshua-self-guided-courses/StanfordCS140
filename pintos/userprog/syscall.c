@@ -218,18 +218,32 @@ mmap (int fd, void *addr)
   {
     struct file* file = get_file_descriptor (fd)->file;
     int len = file_length (file);
+
+    /* Check that all pages are availible. It is more efficient to check in two
+     * loops. Checking and mapping in the same loop would require freeing
+     * previously allocated pages if there is a failed check. */
+    void *paddr = addr;
     int ofs = 0;
+    while (ofs < len)
+    {
+      if (page_exists (paddr + ofs))
+        return -1;
+      paddr += PGSIZE;
+      ofs += PGSIZE;
+    }
 
     /* Lazy load a page in each loop iteration. */
+    paddr = addr;
+    ofs = 0;
     while (ofs < len)
     {
       /* Only read the remaining bytes for the last page. */
       int bytes_left = len - ofs;
       int page_read_bytes = bytes_left > PGSIZE ? PGSIZE : bytes_left;
 
-      lazy_load_segment (addr, file, ofs, page_read_bytes,
+      lazy_load_segment (paddr, file, ofs, page_read_bytes,
           PGSIZE - page_read_bytes, true);
-      addr += PGSIZE;
+      paddr += PGSIZE;
       ofs += PGSIZE;
     }
     return mapid_entry->mapid;
