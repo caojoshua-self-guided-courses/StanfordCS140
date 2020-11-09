@@ -26,25 +26,18 @@ syscall_init (void)
 /* Validate uaddr as a user address. If uaddr is not valid
  * terminate the thread */
 static void
-validate_uaddr (void *uaddr)
+validate_uaddr (const void *uaddr)
 {
-	/* First load the page, in case it was lazy loaded. */
-	/* TODO: Should just call page_exists, instead of loading the page. This
-	currently does not work because the supplemental page table is not
-	keeping track of stack pages. */
-	load_page_into_frame (uaddr);
-
   if (!uaddr || 
     !is_user_vaddr(uaddr) ||
-    (is_unallocated_stack_access (uaddr) && !stack_page_alloc_multiple (uaddr)) ||
-		/* !page_exists (uaddr)) */
-    !pagedir_get_page(thread_current()->pagedir, uaddr))
+    /* (is_unallocated_stack_access (uaddr) && !stack_page_alloc_multiple (uaddr)) || */
+		!page_exists (uaddr))
     exit (-1);
 }
 
 /* Validate the number of args above esp on the stack */
 static void
-validate_args (void *esp, unsigned args)
+validate_args (const void *esp, unsigned args)
 {
   for (unsigned i = 0; i <= args; ++i)
     validate_uaddr (esp + (i * 4));
@@ -52,7 +45,7 @@ validate_args (void *esp, unsigned args)
 
 /* Validates the first and last bytes in a string */
 static void
-validate_string (void *string)
+validate_string (const void *string)
 {
   validate_uaddr (string);
   validate_uaddr (string + strlen (string));
@@ -94,7 +87,7 @@ exit (int status)
 }
 
 static pid_t
-exec (char *cmd_line)
+exec (const char *cmd_line)
 {
   validate_string (cmd_line);
 
@@ -118,21 +111,21 @@ wait (pid_t pid)
 }
 
 static bool
-create (char *file, unsigned initial_size)
+create (const char *file, unsigned initial_size)
 {
   validate_string (file);
   return filesys_create (file, initial_size); 
 }
 
 static bool
-remove (char *file)
+remove (const char *file)
 {
   validate_string (file);
   return filesys_remove (file);
 }
 
 static int
-open (char *file)
+open (const char *file)
 {
   validate_string (file);
   return create_fd (file);
@@ -161,12 +154,15 @@ read (int fd, void *buffer, unsigned size)
   }
   struct file_descriptor *file_descriptor = get_file_descriptor (fd);
   if (file_descriptor)
+    /* This could crash the kernel if accessing the buffer creates a page fault.
+     * Usually we shouldn't allow page faults when accessing device drivers,
+     * but testcases don't test this so whatevs. */
     return file_read (file_descriptor->file, buffer, size); 
   return -1;
 }
 
 static int
-write (int fd, void *buffer, unsigned size)
+write (int fd, const void *buffer, unsigned size)
 {
   validate_uaddr (buffer);
   validate_uaddr (buffer + size);
@@ -177,6 +173,7 @@ write (int fd, void *buffer, unsigned size)
   }
   struct file_descriptor *file_descriptor = get_file_descriptor (fd);
   if (file_descriptor)
+    /* This could cause a kernel crash. See comment in read. */
     return file_write (file_descriptor->file, buffer, size);  
   return 0;
 }
@@ -278,7 +275,7 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_EXEC:
       validate_args (esp, 1);
-      f->eax = exec (*(char **)(esp + 4));
+      f->eax = exec (*(const char **)(esp + 4));
       break;
     case SYS_WAIT:
       validate_args (esp, 1);
@@ -286,15 +283,15 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_CREATE:
       validate_args (esp, 2);
-      f->eax = create (*(char **)(esp + 4), *(int *)(esp + 8));
+      f->eax = create (*(const char **)(esp + 4), *(int *)(esp + 8));
       break;
     case SYS_REMOVE:
       validate_args (esp, 1);
-      f->eax = remove (*(char **)(esp + 4));
+      f->eax = remove (*(const char **)(esp + 4));
       break;
     case SYS_OPEN:
       validate_args (esp, 1);
-      f->eax = open (*(char **)(esp + 4));
+      f->eax = open (*(const char **)(esp + 4));
       break;
     case SYS_FILESIZE:
       validate_args (esp, 1);
@@ -307,7 +304,7 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_WRITE:
       validate_args (esp, 3);
-      f->eax = write (*(int *)(esp + 4), (void *) *(int *)(esp + 8), 
+      f->eax = write (*(int *)(esp + 4), (const void *) *(int *)(esp + 8), 
           *(unsigned *)(esp + 12));
       break;
     case SYS_SEEK:
