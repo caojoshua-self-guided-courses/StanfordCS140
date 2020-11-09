@@ -16,7 +16,6 @@ struct file_descriptor
 struct mapid_entry
 {
   int mapid;
-  int fd;
   struct file *file;
   void *addr;
   unsigned length;

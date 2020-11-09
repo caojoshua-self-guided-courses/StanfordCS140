@@ -154,7 +154,7 @@ create_mapid (int fd, void* addr)
       {
         struct mapid_entry *mapid = malloc (sizeof (struct mapid_entry));
         mapid->mapid = i;
-        mapid->file = file_descriptor->file;
+        mapid->file = file_reopen (file_descriptor->file);
         mapid->addr = addr;
         mapid->length = file_length (mapid->file);
         hash_insert (&process->mapid_map, &mapid->hash_elem);
@@ -241,5 +241,6 @@ internal_remove_mapid (struct mapid_entry *mapid_entry)
     addr += PGSIZE;
   }
 
+  file_close (mapid_entry->file);
   free (mapid_entry);
 }

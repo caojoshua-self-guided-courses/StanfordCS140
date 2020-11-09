@@ -151,7 +151,8 @@ lazy_load_segment (void *uaddr, struct file *file, off_t ofs,
   page->present = PRESENT_FILESYS;
   page->upage = uaddr;
   page->writable = writable;
-  page->file = file;
+  /* Open a new file instance because the original may close. */
+  page->file = file_reopen (file);
   page->ofs = ofs;
   page->read_bytes = read_bytes;
   page->zero_bytes = zero_bytes;
@@ -191,15 +192,12 @@ load_page_from_filesys (struct page *page)
     return false;
 
   /* Load this page. */
-  int old_tell = file_tell (page->file);
 	file_seek (page->file, page->ofs);
   if (file_read (page->file, page->kpage, page->read_bytes) != (int) page->read_bytes)
   {
     internal_page_free (page);
-    file_seek (page->file, old_tell);
     return false; 
   }
-  file_seek (page->file, old_tell);
   memset (page->kpage + page->read_bytes, 0, page->zero_bytes);
 
   page->present = PRESENT_MEMORY;
@@ -258,6 +256,8 @@ internal_page_free (struct page *page)
   {
     pagedir_clear_page (thread_current ()->pagedir, page->upage);
     ffree (page->kpage);
+    file_close (page->file);
     hash_delete (&p->spage_table, &page->hash_elem);
+    free (page);
   }
 }
