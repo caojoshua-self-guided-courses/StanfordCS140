@@ -29,7 +29,7 @@ static void
 validate_uaddr (const void *uaddr)
 {
   if (!uaddr || 
-    !is_user_vaddr(uaddr) ||
+    !is_user_vaddr (uaddr) ||
     /* (is_unallocated_stack_access (uaddr) && !stack_page_alloc_multiple (uaddr)) || */
 		!page_exists (uaddr))
     exit (-1);
@@ -263,8 +263,8 @@ syscall_handler (struct intr_frame *f)
   thread_current ()->esp = esp;
   validate_uaddr (esp);
   
-  uint32_t sys_call_num = *(int *) esp;
-  switch (sys_call_num)
+  uint32_t syscall_num = *(int *) esp;
+  switch (syscall_num)
   {
     case SYS_HALT:
       halt();

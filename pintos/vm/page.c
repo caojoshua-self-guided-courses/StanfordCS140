@@ -16,35 +16,11 @@
 struct page;
 
 static bool load_page_from_filesys (struct page *page);
+static bool load_page_from_swap (struct page *page);
 static void page_add_spage_table (struct page *page);
 static bool page_frame_alloc (struct page *page);
 static bool install_page (void *upage, void *kpage, bool writable);
 static void internal_page_free (struct page *page);
-
-/* Indicates where the page is. */
-enum page_present {
-  PRESENT_MEMORY,
-  PRESENT_FILESYS,
-  PRESENT_SWAP
-};
-
-/* Page metadata to be stored in the supplemental page table. */
-struct page {
-  void *upage;  /* User virtual address. */
-  void *kpage;  /* Kernel virtual address. */
-  struct process *process;
-  enum page_present present;
-  bool writable;
-  bool dirty_bit;
-  int access_time;
-  struct hash_elem hash_elem;
-
-  /* Page is in file system */
-  struct file *file;
-  off_t ofs;
-  uint32_t read_bytes;
-	uint32_t zero_bytes;
-};
 
 /* Returns a hash value for page p. */
 unsigned
@@ -166,6 +142,7 @@ bool
 load_page_into_frame (const void *uaddr)
 {
 	struct page *page = page_lookup (uaddr);
+  /* printf ("%d, %x: load %x into frame %d\n", thread_current()->tid, page, page->upage, page->present); */
 	if (page)
 	{
 		switch (page->present)
@@ -173,7 +150,7 @@ load_page_into_frame (const void *uaddr)
 			case PRESENT_FILESYS:
 				return load_page_from_filesys (page);
 			case PRESENT_SWAP:
-				return false;
+        return load_page_from_swap (page);
 			default:
 				break;
 		}
@@ -181,7 +158,7 @@ load_page_into_frame (const void *uaddr)
 	return false;
 }
 
-/* Loads page into a frame. Returns true if successful, false otherwise. */
+/* Loads page from the filesys into a frame. Returns true if successful. */
 static bool
 load_page_from_filesys (struct page *page)
 {
@@ -204,6 +181,22 @@ load_page_from_filesys (struct page *page)
   return true;
 }
 
+/* Loads page from swap into a frame. Returns true if successful. */
+static bool
+load_page_from_swap (struct page *page)
+{
+  ASSERT (page->present == PRESENT_SWAP);
+
+  if (!page_frame_alloc (page))
+    return false;
+
+  swap_page_read (page->swap_page, page->kpage);
+  swfree (page->swap_page);
+
+  page->present = PRESENT_MEMORY;
+  return true;
+}
+
 /* Adds page to the process's supplemental page table. */
 static void
 page_add_spage_table (struct page *page)
@@ -217,14 +210,9 @@ page_add_spage_table (struct page *page)
 static bool
 page_frame_alloc (struct page *page)
 {
-  void *upage = pg_round_down (page->upage);
-  void *kpage = falloc (PAL_USER | PAL_ZERO); 
-  if (kpage && install_page (upage, kpage, page->writable))
-  {
-    page->kpage = kpage;
-    return true;
-  }
-  return false;
+  page->upage = pg_round_down (page->upage);
+  void *kpage = falloc (page, PAL_USER | PAL_ZERO); 
+  return kpage && install_page (page->upage, kpage, page->writable);
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
