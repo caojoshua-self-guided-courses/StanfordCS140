@@ -15,6 +15,11 @@
 
 struct page;
 
+/* Lock to ensure only one thread is accessing the supplemental page table at
+ * a time. */
+/* TODO: Lock should be per process instead of system-wide. */
+struct lock page_lock;
+
 static bool load_page_from_filesys (struct page *page);
 static bool load_page_from_swap (struct page *page);
 static void page_add_spage_table (struct page *page);
@@ -40,6 +45,37 @@ page_less (const struct hash_elem *a_, const struct hash_elem *b_,
     return a->upage < b->upage;
 }
 
+/* Spage table entry destructor passed into hash_destroy. */
+void
+page_destructor (struct hash_elem *hash_elem, void *aux UNUSED)
+{
+  lock_acquire (&page_lock);
+  struct page *page = hash_entry (hash_elem, struct page, hash_elem);
+  {
+    switch (page->present)
+    {
+      case PRESENT_MEMORY:
+        ffree (page->kpage);
+        break;
+      case PRESENT_SWAP:
+        swfree (page->swap_page);
+        break;
+      default:
+        break;
+    }
+    free (page);
+  }
+  lock_release (&page_lock);
+}
+
+/* Init supplemental page table. NOTE: Individual supplemental page tables are
+ * init on process creation. */
+void
+spage_init (void)
+{
+  lock_init (&page_lock);
+}
+
 /* Looks up page with user virtual address uaddr. */
 static struct page*
 page_lookup (const void *uaddr)
@@ -63,32 +99,51 @@ uaddr. */
 bool
 page_exists (const void *uaddr)
 {
-	if (page_lookup (uaddr))
-		return true;
-	return false;
+  lock_acquire (&page_lock);
+  bool exists = page_lookup (uaddr);
+  lock_release (&page_lock);
+  return exists;
 }
 
-/* Allocates a new page under the bottom of the stack of the current thread. */
+/* Returns if fault address fault_addr is an unallocated stack access. 
+ * Assumes the current thread's esp is correctly set. Can be used to
+ * determine if the stack needs to grow. */ 
+bool
+is_unallocated_stack_access (const void* fault_addr)
+{
+  lock_acquire (&page_lock);
+  void *esp = thread_current ()->esp;
+  bool result = fault_addr < get_stack_bottom() && fault_addr >= esp - PUSHA_BYTES
+		&& fault_addr >= MIN_STACK_ADDRESS; 
+  lock_release (&page_lock);
+  return result;
+}
+
+/* Allocates a new page under the bottom of the stack of the current thread. 
+ * Return the allocated pages upage. */
 void *
 stack_page_alloc (void) 
 {
+  lock_acquire (&page_lock);
   struct page *page = malloc (sizeof (struct page));
+  void *kpage = NULL;
   if (page)
   {
     page->upage = get_stack_bottom () - PGSIZE;
+    page->present = PRESENT_MEMORY;
     page->writable = true;
+    page->tid = thread_current ()->tid;
     page_add_spage_table (page);
 
     if (page_frame_alloc (page))
       ++thread_current ()->stack_pages; 
-    else {
+    else
       page_free (page);
-      return NULL;
-    }
 
-    return page->kpage;
+    kpage = page->upage;
   }
-  return NULL;
+  lock_release (&page_lock);
+  return kpage;
 }
 
 /* Allocates pages under the stack until user virtual address uaddr is loaded 
@@ -112,9 +167,11 @@ stack_page_alloc_multiple (void *uaddr)
 void
 page_free (void *uaddr)
 {
+  lock_acquire (&page_lock);
   struct page *page = page_lookup (uaddr);
   if (page)
     internal_page_free (page);
+  lock_release (&page_lock);
 }
 
 /* Lazy load a segment from executable file. The file metadata will be
@@ -123,16 +180,19 @@ void
 lazy_load_segment (void *uaddr, struct file *file, off_t ofs,
 										uint32_t read_bytes, uint32_t zero_bytes, bool writable)
 {
+  lock_acquire (&page_lock);
   struct page *page = malloc (sizeof (struct page));
   page->present = PRESENT_FILESYS;
   page->upage = uaddr;
   page->writable = writable;
+  page->tid = thread_current ()->tid;
   /* Open a new file instance because the original may close. */
   page->file = file_reopen (file);
   page->ofs = ofs;
   page->read_bytes = read_bytes;
   page->zero_bytes = zero_bytes;
   page_add_spage_table (page);
+  lock_release (&page_lock);
 }  
 
 /* Looks up the page containing user virtual address upage, and calls the helper
@@ -141,21 +201,25 @@ is successfully loaded, false otherwise. */
 bool
 load_page_into_frame (const void *uaddr)
 {
+  lock_acquire (&page_lock);
 	struct page *page = page_lookup (uaddr);
-  /* printf ("%d, %x: load %x into frame %d\n", thread_current()->tid, page, page->upage, page->present); */
+  bool result = false;
 	if (page)
 	{
 		switch (page->present)
 		{
 			case PRESENT_FILESYS:
-				return load_page_from_filesys (page);
+        result = load_page_from_filesys (page);
+        break;
 			case PRESENT_SWAP:
-        return load_page_from_swap (page);
+        result = load_page_from_swap (page);
+        break;
 			default:
 				break;
 		}
 	}
-	return false;
+  lock_release (&page_lock);
+	return result;
 }
 
 /* Loads page from the filesys into a frame. Returns true if successful. */
@@ -243,6 +307,8 @@ internal_page_free (struct page *page)
   if (page)
   {
     pagedir_clear_page (thread_current ()->pagedir, page->upage);
+    if (page->present == PRESENT_MEMORY)
+      palloc_free_page (page->kpage);
     ffree (page->kpage);
     file_close (page->file);
     hash_delete (&p->spage_table, &page->hash_elem);

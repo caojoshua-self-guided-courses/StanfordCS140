@@ -30,7 +30,6 @@ validate_uaddr (const void *uaddr)
 {
   if (!uaddr || 
     !is_user_vaddr (uaddr) ||
-    /* (is_unallocated_stack_access (uaddr) && !stack_page_alloc_multiple (uaddr)) || */
 		!page_exists (uaddr))
     exit (-1);
 }

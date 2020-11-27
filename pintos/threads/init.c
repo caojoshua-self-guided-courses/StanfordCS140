@@ -100,6 +100,7 @@ main (void)
   palloc_init (user_page_limit);
   malloc_init ();
   paging_init ();
+  spage_init ();
   falloc_init ();
 
   /* Segmentation. */

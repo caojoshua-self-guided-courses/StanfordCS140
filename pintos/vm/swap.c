@@ -16,6 +16,9 @@ struct block *swap_block;
 struct swap_slot *swap_table;
 int swap_num_pages;
 
+/* Lock so that multiple threads cannot alloc/free swap at the same time. */
+struct lock swap_lock;
+
 struct swap_slot
 {
   bool free;
@@ -35,31 +38,38 @@ swalloc_init (void)
     struct swap_slot *swap_slot = swap_table + i;
     swap_slot->free = true;
   }
+
+  lock_init (&swap_lock);
 }
 
 /* Allocate a page in swap. Return the swap page in which the page starts on. */
 swap_page_t
 swalloc (void)
 {
+  lock_acquire (&swap_lock);
+  swap_page_t swap_page = SWAP_PAGE_ERROR;
   for (swap_page_t i = 0; i < swap_num_pages; ++i)
   {
     struct swap_slot *swap_slot = swap_table + i;
     if (swap_slot->free)
     {
       swap_slot->free = false;
-      return i;
+      swap_page = i;
+      break;
     }
   }
-  return SWAP_PAGE_ERROR;
+  lock_release (&swap_lock);
+  return swap_page;
 }
 
 /* Frees swap page at swap_page. */
 void
 swfree (swap_page_t swap_page)
 {
-  /* printf ("free %d\n", swap_page); */
+  lock_acquire (&swap_lock);
   struct swap_slot *swap_slot = swap_table + swap_page;
   swap_slot->free = true;
+  lock_release (&swap_lock);
 }
 
 /* Reads page at swap_page into buffer. */

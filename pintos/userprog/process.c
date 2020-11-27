@@ -240,6 +240,7 @@ process_exit (void)
     clean_child_processes (p->pid);
     if (p->executable)
       file_close (p->executable);
+    hash_destroy (&p->spage_table, page_destructor);
   }
 
   uint32_t *pd;

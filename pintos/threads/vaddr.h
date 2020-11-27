@@ -24,7 +24,8 @@
 #define PGMASK  BITMASK(PGSHIFT, PGBITS)   /* Page offset bits (0:12). */
 
 #define PUSHA_BYTES 32 /* Number of bytes PUSHA pushes. */
-#define MIN_STACK_ADDRESS (PHYS_BASE - 20 * PGSIZE)
+#define MAX_STACK_SIZE 8192000 /* 8 MB. */
+#define MIN_STACK_ADDRESS PHYS_BASE - MAX_STACK_SIZE
 
 /* Offset within a page. */
 static inline unsigned pg_ofs (const void *va) {
@@ -90,17 +91,6 @@ vtop (const void *vaddr)
   ASSERT (is_kernel_vaddr (vaddr));
 
   return (uintptr_t) vaddr - (uintptr_t) PHYS_BASE;
-}
-
-/* Returns if fault address fault_addr is an unallocated stack access. 
- * Assumes the current thread's esp is correctly set. Can be used to
- * determine if the stack needs to grow. */ 
-static inline bool
-is_unallocated_stack_access (const void* fault_addr)
-{
-  void *esp = thread_current ()->esp;
-  return fault_addr < get_stack_bottom() && fault_addr >= esp - PUSHA_BYTES
-		&& fault_addr >= MIN_STACK_ADDRESS; 
 }
 
 #endif /* threads/vaddr.h */

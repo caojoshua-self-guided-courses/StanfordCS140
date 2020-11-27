@@ -19,6 +19,7 @@ struct page {
   struct process *process;
   enum page_present present;
   bool writable;
+  int tid;
   bool dirty_bit;
   int access_time;
   struct hash_elem hash_elem;
@@ -37,8 +38,11 @@ struct page {
 unsigned page_hash (const struct hash_elem *p_, void *aux);
 bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, 
     void *aux);
+void page_destructor (struct hash_elem *hash_elem, void *aux);
 
+void spage_init (void);
 bool page_exists (const void *vaddr);
+bool is_unallocated_stack_access (const void *fault_addr);
 void *stack_page_alloc (void);
 void *stack_page_alloc_multiple (void *vaddr);
 void page_free (void *vaddr);

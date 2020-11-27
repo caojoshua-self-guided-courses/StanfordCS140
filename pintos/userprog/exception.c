@@ -154,7 +154,6 @@ page_fault (struct intr_frame *f)
   user = (f->error_code & PF_U) != 0;
 
 	bool success = false;
-  // TODO: allow page faults when kernel is accessing user memory
 	if (not_present)
   {
     /* Allocate a new page if the fault occured during a user stack access. */

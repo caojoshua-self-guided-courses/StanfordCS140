@@ -175,7 +175,6 @@ remove_mapid (int mapid)
   {
     if (process)
       hash_delete (&process->mapid_map, &mapid_entry->hash_elem);
-
     internal_remove_mapid (mapid_entry);
   }
 }

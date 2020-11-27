@@ -18,13 +18,16 @@ struct list frame_table;
 struct frame {
   void *kpage;
   struct page *page;
-  struct thread *thread;
   struct list_elem elem;
 };
+
+/* Lock to ensure only one thread is accessing the frame at a time. */
+struct lock frame_lock;
 
 void
 falloc_init (void) {
   list_init (&frame_table);
+  lock_init (&frame_lock);
 }
 
 /* Allocates a page and returns a pointer to it. If no frames are
@@ -32,6 +35,7 @@ falloc_init (void) {
 void *
 falloc (struct page *page, enum palloc_flags flags)
 {
+  lock_acquire (&frame_lock);
   void *kpage = palloc_get_page (flags);
   if (kpage)
   {
@@ -40,6 +44,7 @@ falloc (struct page *page, enum palloc_flags flags)
     frame->page = page;
     page->kpage = kpage;
     list_push_back (&frame_table, &frame->elem);
+    lock_release (&frame_lock);
     return kpage;
   }
 
@@ -56,23 +61,31 @@ falloc (struct page *page, enum palloc_flags flags)
   /* TODO: unmodified file pages can be read back to filesys. */
   swap_page_write (swap_page, evict_page->kpage);
   page->kpage = evict_page->kpage;
-  pagedir_clear_page (thread_current ()->pagedir, evict_page->upage);
+  evict_page->kpage = NULL;
   evict_page->present = PRESENT_SWAP;
   evict_page->swap_page = swap_page;
 
+  struct thread *t = get_thread (evict_page->tid);
+  if (t)
+    pagedir_clear_page (t->pagedir, evict_page->upage);
+
+  lock_release (&frame_lock);
   return page->kpage;
 }
 
-/* Frees a frame. */
+/* Frees a frame entry in frame table.
+ * NOTE: don't free the hardware page here because different use cases free
+ * in different ways. */
 void
 ffree (void *kpage)
 {
-  struct frame *frame = get_frame(kpage);
+  lock_acquire (&frame_lock);
+  struct frame *frame = get_frame (kpage);
   if (frame) {
-    palloc_free_page (frame->kpage);
     list_remove (&frame->elem);
     free (frame);
   }
+  lock_release (&frame_lock);
 }
 
 /* Returns the frame that is pointed to by page. */
