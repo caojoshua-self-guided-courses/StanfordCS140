@@ -153,6 +153,14 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+  /* If the fault is a rights violation on user memory, whether from user or
+   * kernel mode, it probably means a user program is attempting to write 
+   * into a page without write permissions. Exit the thread. */
+  if (!not_present)
+    exit (-1);
+
+  /* If page is not present, attempt to load the page from outside of main
+   * memory. */
 	bool success = false;
 	if (not_present)
   {
