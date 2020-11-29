@@ -52,21 +52,36 @@ falloc (struct page *page, enum palloc_flags flags)
 
   /* No frame is available. Evict a page and load it into swap. The page
    * requesting a frame will point to the kpage of the evicted page. */
-  swap_page_t swap_page = swalloc ();
   struct frame *evict_frame = get_frame_to_evict ();
   struct page *evict_page = evict_frame->page;
 
-  evict_frame->page = page;
   list_remove (&evict_frame->elem);
   list_push_back (&frame_table, &evict_frame->elem);
 
-  /* TODO: unmodified file pages can be read back to filesys. */
-  swap_page_write (swap_page, evict_page->kpage);
+  /* If page is unmodified and comes from a file, evict the page to
+   * filesys. Check upage and kpage dirty bit, since
+   * they are both aliased to the same frame. */
+  int32_t *pagedir = get_thread (evict_page->tid)->pagedir;
+  if (!pagedir_is_dirty (pagedir, evict_page->upage) &&
+      !pagedir_is_dirty (pagedir, evict_page->kpage) &&
+      evict_page->file)
+    evict_page->present = PRESENT_FILESYS;
+
+  /* If unable to evict page to filesys, evict to swap. */
+  else
+  {
+    swap_page_t swap_page = swalloc ();
+    swap_page_write (swap_page, evict_page->kpage);
+    evict_page->present = PRESENT_SWAP;
+    evict_page->swap_page = swap_page;
+  }
+
+  evict_frame->page = page;
   page->kpage = evict_page->kpage;
   evict_page->kpage = NULL;
-  evict_page->present = PRESENT_SWAP;
-  evict_page->swap_page = swap_page;
 
+  /* Clear the evicted pages upage mapping from its process's page
+   * directory. */
   struct thread *t = get_thread (evict_page->tid);
   if (t)
     pagedir_clear_page (t->pagedir, evict_page->upage);
