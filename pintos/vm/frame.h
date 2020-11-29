@@ -10,5 +10,6 @@ struct page;
 void falloc_init (void);
 void *falloc (struct page *page, enum palloc_flags flags);
 void ffree (void *page);
+void frame_tick (void);
 
 #endif /* threads/frame.h */

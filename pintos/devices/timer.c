@@ -7,6 +7,7 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "vm/frame.h"
   
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -196,6 +197,9 @@ timer_interrupt (struct intr_frame *args UNUSED)
       thread_unblock(sleeping_thread);
     }
   };
+
+  /* Update frame access ticks. */
+  frame_tick ();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
