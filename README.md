@@ -9,6 +9,7 @@ Everything is run on docker. Run `sudo make docker-container`. This will mount t
 * A project is considered complete when all the given test cases pass. There is some possibility that test cases from previous projects are broken when working on new projects. Here are the commits where a project was completed:
   * [Project 1 Threads](https://github.com/caojoshua/StanfordCS140/tree/ec0d98c73b93d8ff03eaeffa0d05de29efb6d827). Some of the docker setup might be messed up here.
   * [Project 2 User Programs](https://github.com/caojoshua/StanfordCS140/tree/cce3d0c15f86a31a0621c84ddfa0847799169517)
+  * [Project 3 Virtual Memory](https://github.com/caojoshua/StanfordCS140/commit/2ef27ee68171523f5bf70511ecf782c0bea0607c)
 
 ## Random Implementation Notes
 Adding some random tidbits here because I'm too lazy to create design docs.
@@ -19,5 +20,6 @@ Adding some random tidbits here because I'm too lazy to create design docs.
 
 ### Project 3 Virtual memory
 On branch virtual-memory
-* [This commit](https://github.com/caojoshua/StanfordCS140/commit/3508297ed2873f495cdfa6e6776227bf78880c2f) introduces a workaround for syn-read and syn-write testcases. After introducing segment lazy-loading, when child processes attempt to access the file system, the root directory is empty. Forcing the parent process to wait after executing each child process fixes this probem. This could be a synchronization error, or some bug in the demand paging implementation. After understanding the filesys better, I should revert the workarounds and pass the testcases normally.
+* There is a buttload of disk access syscall synchronization I added to pass parallel testcases. Maybe not all is needed, but keeping all because its safe.
+* In this implementation of virtual memory, user pages are allocated through page_alloc, which calls f(rame)alloc, which calls sw(ap)alloc if needed. falloc calls palloc to get a free kernel page, but the chain feels unintuitive. I am not a huge fan in Pintos having de-coupling between hardware page table, supplemental page table, and page allocations. Would be interesting to see real implementations of page/frame/swap. 
 
