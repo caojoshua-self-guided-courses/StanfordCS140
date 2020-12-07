@@ -123,6 +123,7 @@ print_stats (void)
   thread_print_stats ();
 #ifdef FILESYS
   block_print_stats ();
+  cache_print_stats ();
 #endif
   console_print_stats ();
   kbd_print_stats ();

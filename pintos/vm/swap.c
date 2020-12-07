@@ -31,6 +31,7 @@ swalloc_init (void)
 {
   swap_block = block_get_role (BLOCK_SWAP);
   swap_num_pages = block_size (swap_block) * BLOCK_SECTOR_SIZE / PGSIZE;
+  // TODO: static alloc instead of malloc
   swap_table = malloc (swap_num_pages * sizeof (struct swap_slot));
 
   for (swap_page_t i = 0; i < swap_num_pages; ++i)
