@@ -220,12 +220,19 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       if (chunk_size <= 0)
         break;
 
-      /* Read the sectors contents into buffer from cache. */
-      cache_read (sector_idx, buffer + bytes_read, sector_ofs, chunk_size);
-      
       /* Advance. */
       size -= chunk_size;
       offset += chunk_size;
+
+      /* Read the next sector asynchronously if this is not the last sector.
+       * This could be cleaner, but don't want to break logic so whatevs. */
+      off_t next_inode_left = inode_length(inode) - offset; 
+      if (size > 0 && next_inode_left > 0)
+        cache_read_async (byte_to_sector (inode, offset));
+
+      /* Read the sectors contents into buffer from cache. */
+      cache_read (sector_idx, buffer + bytes_read, sector_ofs, chunk_size);
+      
       bytes_read += chunk_size;
     }
 
