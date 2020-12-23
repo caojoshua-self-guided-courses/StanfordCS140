@@ -55,9 +55,16 @@ cache_init (void)
   thread_create ("cache to disk writer", PRI_DEFAULT, write_cache_to_disk, NULL);
 }
 
+/* Read entire sector into buffer. */
+void
+cache_read (block_sector_t sector, void *buffer)
+{
+  cache_read_partial (sector, buffer, 0, BLOCK_SECTOR_SIZE);
+}
+
 /* Read size bytes from sector base address + sector_ofs into buffer. */
 void
-cache_read (block_sector_t sector, void *buffer, int sector_ofs, int size)
+cache_read_partial (block_sector_t sector, void *buffer, int sector_ofs, int size)
 {
   ASSERT (sector_ofs + size <= BLOCK_SECTOR_SIZE);
 
@@ -89,9 +96,16 @@ void cache_read_async (block_sector_t sector)
   }
 }
 
+/* Read entire sector into buffer. */
+void
+cache_write (block_sector_t sector, void *buffer)
+{
+  cache_write_partial (sector, buffer, 0, BLOCK_SECTOR_SIZE);
+}
+
 /* Write size bytes from buffer into sector base address + sector_ofs. */
 void
-cache_write (block_sector_t sector, const void *buffer, int sector_ofs,
+cache_write_partial (block_sector_t sector, const void *buffer, int sector_ofs,
     int size)
 {
   ASSERT (sector_ofs + size <= BLOCK_SECTOR_SIZE);

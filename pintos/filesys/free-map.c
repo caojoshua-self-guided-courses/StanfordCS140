@@ -36,7 +36,16 @@ free_map_allocate (size_t cnt, block_sector_t *sectorp)
       sector = BITMAP_ERROR;
     }
   if (sector != BITMAP_ERROR)
+  {
     *sectorp = sector;
+    /* Write all the sectors into sectorp.
+     * TODO: non-consecutive sector allocation. */
+    for (block_sector_t i = 0; i < cnt; ++i)
+    {
+      sectorp[i] = sector + i;
+    }
+  }
+
   return sector != BITMAP_ERROR;
 }
 

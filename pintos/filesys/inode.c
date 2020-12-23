@@ -8,8 +8,47 @@
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
 
+/* TERMINOLOGY:
+ * DBLOCK = direct block. INDBLOCK = indirect block.
+ * INDBLOCK has children. eg. DOUBLY INDBLOCK children are INDBLOCKS. INDBLOCK
+ * children are DBLOCKS.
+ *
+ * Although in practice, inodes would point to blocks, we use the same size
+ * for blocks and sectors. Hence why inodes point to block_sector_t type. */
+
+/* EXTENSIBLE INODE DESIGN:
+ * Each inode has
+ * - 12 pointers to direct blocks
+ * - 1 pointer to an indblock, which has 128 pointers to direct blocks
+ * - 1 pointesr to a doubly indblock, which has 128 pointers to indblocks.
+ *   Each of those indblocks has 128 pointers to direct blocks. */
+
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
+
+/* Direct blocks in an inode. */
+#define INODE_NUM_DBLOCKS 12
+
+/* Indblocks in an inode or doubly indblock. */
+/* Why you gotta bust me preprocessor. */
+/* #define INDBLOCK_NUM_CHILDREN BLOCK_SECTOR_SIZE / sizeof (block_sector_t) */
+#define INDBLOCK_NUM_CHILDREN 128
+
+/* Max number of grandchildren for a doubly indblock. */
+#define DOUBLY_INDBLOCK_NUM_GRANDCHILDREN INDBLOCK_NUM_CHILDREN * \
+  INDBLOCK_NUM_CHILDREN
+
+/* Sector inclusive boundaries for dblocks and indblocks. */
+/* Preprocessor is super wack. If I use the commented line, tests fail. */
+/* #define DBLOCK_END_BOUND INODE_NUM_DBLOCKS - 1 */
+#define DBLOCK_END_BOUND 11
+/* Add 1 for indblock itself. This is wack as well. */
+/* #define INDBLOCK_END_BOUND DBLOCK_END_BOUND + INDBLOCK_NUM_CHILDREN */
+#define INDBLOCK_END_BOUND 140
+
+/* Max number of sectors a file can contain. Add one for doubly indblock itself. */
+#define FILE_MAX_SECTORS INDBLOCK_END_BOUND + INDBLOCK_NUM_CHILDREN + \
+  DOUBLY_INDBLOCK_NUM_GRANDCHILDREN + 1
 
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
@@ -17,16 +56,51 @@ struct inode_disk
   {
     block_sector_t start;               /* First data sector. */
     off_t length;                       /* File size in bytes. */
+    block_sector_t dblocks[INODE_NUM_DBLOCKS];
+    block_sector_t indblock;
+    block_sector_t doubly_indblock;
     unsigned magic;                     /* Magic number. */
-    uint32_t unused[125];               /* Not used. */
+    uint32_t unused[111];               /* Not used. */
   };
 
-/* Returns the number of sectors to allocate for an inode SIZE
+static bool inode_disk_extend (struct inode_disk *inode_disk,
+    off_t new_length);
+
+/* Returns the number of data sectors(dblocks) to allocate for an inode SIZE
    bytes long. */
 static inline size_t
-bytes_to_sectors (off_t size)
+bytes_to_data_sectors (off_t size)
 {
   return DIV_ROUND_UP (size, BLOCK_SECTOR_SIZE);
+}
+
+/* Returns the number of indblocks for a file so SIZE bytes
+ * long. */
+static size_t
+bytes_to_indirect_sectors (off_t size)
+{
+  size_t data_sectors_left = bytes_to_data_sectors (size);
+
+  /* File only consists of dblocks. */
+  if (data_sectors_left <= INODE_NUM_DBLOCKS)
+    return 0;
+
+  /* File contains indblock. */
+  data_sectors_left -= INODE_NUM_DBLOCKS;
+  if (data_sectors_left <= INDBLOCK_NUM_CHILDREN)
+    return 1;
+
+  /* File contains doubly indblocks. */
+  data_sectors_left -= INDBLOCK_NUM_CHILDREN;
+  block_sector_t doubly_indblocks = DIV_ROUND_UP (data_sectors_left, INDBLOCK_NUM_CHILDREN);
+  return 2 + doubly_indblocks;
+}
+
+/* Returns the total number of sectors to allocate for an inode SIZE
+   bytes long. */
+static inline size_t
+bytes_to_sectors (off_t size) {
+  return bytes_to_data_sectors (size) + bytes_to_indirect_sectors (size);
 }
 
 /* In-memory inode. */
@@ -45,13 +119,38 @@ struct inode
    Returns -1 if INODE does not contain data for a byte at offset
    POS. */
 static block_sector_t
-byte_to_sector (const struct inode *inode, off_t pos) 
+byte_to_sector (const struct inode_disk *inode_disk, off_t pos) 
 {
-  ASSERT (inode != NULL);
-  if (pos < inode->data.length)
-    return inode->data.start + pos / BLOCK_SECTOR_SIZE;
-  else
-    return -1;
+  ASSERT (inode_disk != NULL);
+
+  unsigned sector_num = pos / BLOCK_SECTOR_SIZE;
+
+  /* Dblock. */
+  if (sector_num < INODE_NUM_DBLOCKS)
+    return inode_disk->dblocks[sector_num];
+
+  /* Indblock. */
+  sector_num -= INODE_NUM_DBLOCKS;
+  if (sector_num < INDBLOCK_NUM_CHILDREN)
+  {
+    block_sector_t indblock[INDBLOCK_NUM_CHILDREN];
+    cache_read (inode_disk->indblock, indblock);
+    return indblock[sector_num];
+  }
+
+  /* Doubly Indblock. */
+  sector_num -= INDBLOCK_NUM_CHILDREN;
+  if (sector_num < DOUBLY_INDBLOCK_NUM_GRANDCHILDREN)
+  {
+    block_sector_t indblock[BLOCK_SECTOR_SIZE];
+    cache_read (inode_disk->doubly_indblock, indblock);
+
+    cache_read (indblock[sector_num / INDBLOCK_NUM_CHILDREN], indblock);
+    return indblock[sector_num % INDBLOCK_NUM_CHILDREN];
+  }
+
+  /* Accessing sector beyond the max possible sector size. */
+  return -1;
 }
 
 /* List of open inodes, so that opening a single inode twice
@@ -73,35 +172,24 @@ inode_init (void)
 bool
 inode_create (block_sector_t sector, off_t length)
 {
-  struct inode_disk *disk_inode = NULL;
+  struct inode_disk *inode_disk = NULL;
   bool success = false;
 
   ASSERT (length >= 0);
 
   /* If this assertion fails, the inode structure is not exactly
      one sector in size, and you should fix that. */
-  ASSERT (sizeof *disk_inode == BLOCK_SECTOR_SIZE);
+  ASSERT (sizeof *inode_disk == BLOCK_SECTOR_SIZE);
 
-  disk_inode = calloc (1, sizeof *disk_inode);
-  if (disk_inode != NULL)
+  inode_disk = calloc (1, sizeof *inode_disk);
+  if (inode_disk != NULL)
     {
-      size_t sectors = bytes_to_sectors (length);
-      disk_inode->length = length;
-      disk_inode->magic = INODE_MAGIC;
-      if (free_map_allocate (sectors, &disk_inode->start)) 
-        {
-          cache_write (sector, disk_inode, 0, BLOCK_SECTOR_SIZE);
-          if (sectors > 0) 
-            {
-              static char zeros[BLOCK_SECTOR_SIZE];
-              size_t i;
-              
-              for (i = 0; i < sectors; i++) 
-                cache_write (disk_inode->start + i, zeros, 0, BLOCK_SECTOR_SIZE);
-            }
-          success = true; 
-        } 
-      free (disk_inode);
+      inode_disk->length = 0;
+      inode_disk->magic = INODE_MAGIC;
+      if (inode_disk_extend (inode_disk, length))
+        cache_write (sector, inode_disk);
+      free (inode_disk);
+      return true;
     }
   return success;
 }
@@ -138,7 +226,7 @@ inode_open (block_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
-  cache_read (inode->sector, &inode->data, 0, BLOCK_SECTOR_SIZE);
+  cache_read (inode->sector, &inode->data);
   return inode;
 }
 
@@ -207,7 +295,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
   while (size > 0) 
     {
       /* Disk sector to read, starting byte offset within sector. */
-      block_sector_t sector_idx = byte_to_sector (inode, offset);
+      block_sector_t sector_idx = byte_to_sector (&inode->data, offset);
       int sector_ofs = offset % BLOCK_SECTOR_SIZE;
 
       /* Bytes left in inode, bytes left in sector, lesser of the two. */
@@ -228,10 +316,10 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
        * This could be cleaner, but don't want to break logic so whatevs. */
       off_t next_inode_left = inode_length(inode) - offset; 
       if (size > 0 && next_inode_left > 0)
-        cache_read_async (byte_to_sector (inode, offset));
+        cache_read_async (byte_to_sector (&inode->data, offset));
 
       /* Read the sectors contents into buffer from cache. */
-      cache_read (sector_idx, buffer + bytes_read, sector_ofs, chunk_size);
+      cache_read_partial (sector_idx, buffer + bytes_read, sector_ofs, chunk_size);
       
       bytes_read += chunk_size;
     }
@@ -257,7 +345,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   while (size > 0) 
     {
       /* Sector to write, starting byte offset within sector. */
-      block_sector_t sector_idx = byte_to_sector (inode, offset);
+      block_sector_t sector_idx = byte_to_sector (&inode->data, offset);
       int sector_ofs = offset % BLOCK_SECTOR_SIZE;
 
       /* Bytes left in inode, bytes left in sector, lesser of the two. */
@@ -271,7 +359,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
         break;
 
       /* Write the buffer contents into cache. */
-      cache_write (sector_idx, buffer + bytes_written, sector_ofs, chunk_size);
+      cache_write_partial (sector_idx, buffer + bytes_written, sector_ofs, chunk_size);
 
       /* Advance. */
       size -= chunk_size;
@@ -307,4 +395,139 @@ off_t
 inode_length (const struct inode *inode)
 {
   return inode->data.length;
+}
+
+/* Helper function to copy sectors to the inode. Should be called during inode
+ * creation. */
+/* TODO: actually test this on extending files, cause its probably gonna break. */
+static bool
+inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
+{
+  if (new_length <= inode_disk->length)
+    return false;
+
+  static char zeros[BLOCK_SECTOR_SIZE];
+
+  /* Compute current and new number of sectors. */
+  size_t num_cur_sectors = bytes_to_sectors (inode_disk->length);
+  size_t num_new_sectors = bytes_to_sectors (new_length) - num_cur_sectors;
+
+  /* Compute important sector numbers. */
+  block_sector_t cur_last_sector_num = num_cur_sectors - 1;
+  block_sector_t new_last_sector_num = cur_last_sector_num + num_new_sectors;
+  block_sector_t sector_num = byte_to_sector (inode_disk, inode_disk->length);
+
+  /* Allocate new sectors. Return if there is an allocation failure. */
+  block_sector_t *sectors = malloc (sizeof (block_sector_t) * num_new_sectors);
+  if (!sectors || !free_map_allocate (num_new_sectors, sectors))
+    return false;
+
+  /* Set the inode_disk new length. */
+  inode_disk->length = new_length;
+
+
+  /***** Write direct blocks. *****/
+  if (sector_num < DBLOCK_END_BOUND)
+  {
+    /* Compute number of dblocks to write. */
+    block_sector_t dblock_new_last_sector_num = new_last_sector_num < DBLOCK_END_BOUND ?
+      new_last_sector_num : DBLOCK_END_BOUND;
+
+    /* Write to inode_disk dblocks and fill in dblock sectors with zeros. */
+    while (sector_num <= dblock_new_last_sector_num)
+    {
+      cache_write (sectors[sector_num], zeros);
+      inode_disk->dblocks[sector_num] = sectors[sector_num];
+      ++sector_num;
+    }
+
+    /* Sanity check. */
+    ASSERT (sector_num - 1 == DBLOCK_END_BOUND || sector_num - 1 == new_last_sector_num);
+
+    /* Return if done writing sectors. */
+    if (new_last_sector_num <= DBLOCK_END_BOUND)
+    {
+      free (sectors);
+      return true;
+    }
+  }
+
+
+  /***** Write indirect block and its children. *****/
+  if (sector_num <= INDBLOCK_END_BOUND)
+  {
+    /* Compute needed number of indblock child blocks. */
+    block_sector_t indblock_new_last_sector_num = new_last_sector_num < INDBLOCK_END_BOUND ?
+      new_last_sector_num : INDBLOCK_END_BOUND;
+    size_t sectors_to_write = indblock_new_last_sector_num - DBLOCK_END_BOUND - 1;
+
+    /* Write to inode_disk indblock if needed. */
+    if (sector_num == DBLOCK_END_BOUND + 1)
+      inode_disk->indblock = sectors[sector_num];
+
+    /* Write child pointers to indblock on disk. */
+    // TODO: only do this within previous if statement. Otherwise, write to the current indblock sector.
+    cache_write_partial (sectors[sector_num], sectors + sector_num + 1,
+        sector_num - DBLOCK_END_BOUND - 1, sectors_to_write * sizeof (block_sector_t));
+    ++sector_num;
+
+    /* Fill data blocks with zeros. */
+    while (sector_num <= indblock_new_last_sector_num)
+      cache_write (sectors[sector_num++], zeros);
+
+    /* Return if done writing sectors. */
+    if (new_last_sector_num <= INDBLOCK_END_BOUND)
+    {
+      free (sectors);
+      return true;
+    }
+  }
+
+
+  /***** Write doubly indirect block and its children. *****/
+  // TODO: this should account for file extension
+
+  /* Compute needed number of doubly indblock child blocks. */
+  size_t sectors_to_write = new_last_sector_num - INDBLOCK_END_BOUND - 1;
+
+  /* Write doubly indblock and its children. */
+  /* TODO: also allow file extension. */
+  if (sector_num <= FILE_MAX_SECTORS)
+  {
+    /* Write to inode_disk doubly indblock. */
+    inode_disk->doubly_indblock = sectors[sector_num];
+  
+    /* Compute number of doubly indblock immediate children, and write to
+     * disk. */
+    size_t doubly_indblock_direct_children = DIV_ROUND_UP (sectors_to_write,
+        INDBLOCK_NUM_CHILDREN * (INDBLOCK_NUM_CHILDREN + 1));
+    cache_write_partial (inode_disk->doubly_indblock, sectors + sector_num + 1,
+        0, doubly_indblock_direct_children * sizeof (block_sector_t));
+    ++sector_num;
+
+    /* Write doubly indblock children. */
+    for (unsigned i = 0; i < doubly_indblock_direct_children; ++i)
+    {
+      /* Compute direct blocks to write. */
+      block_sector_t direct_blocks_to_write = sectors_to_write <= INDBLOCK_NUM_CHILDREN ?
+        sectors_to_write : INDBLOCK_NUM_CHILDREN;
+      block_sector_t last_dblock_to_write = sector_num + direct_blocks_to_write;
+
+      /* Write the indblock (doubly indblock child). */
+      cache_write_partial (sectors[sector_num], sectors + sector_num + 1, 0, direct_blocks_to_write
+          * sizeof (block_sector_t));
+      ++sector_num;
+
+      /* Fill data blocks with zeros. */
+      while (sector_num < last_dblock_to_write)
+        cache_write (sectors[sector_num++], zeros);
+    }
+
+    /* Sanity Check. */
+    ASSERT (sector_num - 1 == new_last_sector_num);
+
+    return true;
+  }
+
+  return false;
 }
