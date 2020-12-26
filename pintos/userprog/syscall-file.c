@@ -34,24 +34,27 @@ create_fd (const char *file_name)
     struct list *fd_map = &process->fd_map;
 
     struct file_descriptor *file_descriptor = malloc (sizeof (struct file_descriptor));
-    file_descriptor->file = file;
-
-    /* Iterate through the fd list until there is an open fd */
-    struct list_elem *e;
-    for (e = list_begin (fd_map); e != list_end (fd_map); e = list_next (e))
+    if (file_descriptor)
     {
-      struct file_descriptor *fd_temp = list_entry (e, struct file_descriptor, elem);
-      if (fd != fd_temp->fd)
+      file_descriptor->file = file;
+
+      /* Iterate through the fd list until there is an open fd */
+      struct list_elem *e;
+      for (e = list_begin (fd_map); e != list_end (fd_map); e = list_next (e))
       {
-        file_descriptor->fd = fd;
-        e = list_next(e);
-        break;
+        struct file_descriptor *fd_temp = list_entry (e, struct file_descriptor, elem);
+        if (fd != fd_temp->fd)
+        {
+          file_descriptor->fd = fd;
+          e = list_next(e);
+          break;
+        }
+        ++fd;
       }
-      ++fd;
+      file_descriptor->fd = fd;
+      list_insert (e, &file_descriptor->elem);
+      return fd;
     }
-    file_descriptor->fd = fd;
-    list_insert (e, &file_descriptor->elem);
-    return fd;
   }
   return -1;
 }

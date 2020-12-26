@@ -13,6 +13,10 @@
 /* How many ticks in between flushing cache to disk. */
 #define DISK_WRITE_FREQUENCY 10
 
+/* Max number of asynchronous async read-ahead threads. */
+#define MAX_READ_AHEAD_THREADS 10
+
+static bool cache_entry_exists (block_sector_t sector);
 static struct cache_entry * get_cache_entry (block_sector_t sector);
 static void read_cache_entry_from_disk (struct cache_entry *cache_entry);
 static void write_cache_entry_to_disk (struct cache_entry *cache_entry);
@@ -37,6 +41,8 @@ struct cache_entry
 struct cache_entry cache[CACHE_NUM_SECTORS];
 
 struct lock cache_lock;
+
+static unsigned read_ahead_threads = 0;
 
 /* Init the buffer cache. */
 void
@@ -74,8 +80,13 @@ cache_read (block_sector_t sector, void *buffer, int sector_ofs, int size)
 void cache_read_async (block_sector_t sector)
 {
   block_sector_t *sector_ptr = malloc (sizeof (block_sector_t));
-  *sector_ptr = sector;
-  thread_create ("cache_read_async", PRI_DEFAULT, cache_read_thread, sector_ptr);
+  if (sector_ptr && read_ahead_threads < MAX_READ_AHEAD_THREADS &&
+      !cache_entry_exists (sector))
+  {
+    *sector_ptr = sector;
+    ++read_ahead_threads;
+    thread_create ("cache_read_async", PRI_DEFAULT, cache_read_thread, sector_ptr);
+  }
 }
 
 /* Write size bytes from buffer into sector base address + sector_ofs. */
@@ -85,7 +96,7 @@ cache_write (block_sector_t sector, const void *buffer, int sector_ofs,
 {
   ASSERT (sector_ofs + size <= BLOCK_SECTOR_SIZE);
 
-  /* printf ("cache read at sector %d\n", sector); */
+  /* printf ("cache write at sector %d\n", sector); */
 
   struct cache_entry *cache_entry = get_cache_entry (sector);
 
@@ -104,6 +115,18 @@ cache_print_stats (void)
   printf ("Filesys buffer cache: %d reads, %d writes\n", cache_reads, cache_writes);
 }
 
+/* Check if a cache entry exists for sector. */
+static bool
+cache_entry_exists (block_sector_t sector)
+{
+  for (int i = 0; i < CACHE_NUM_SECTORS; ++i)
+  {
+    if (cache[i].sector == sector && !cache[i].free)
+      return true;
+  }
+  return false;
+}
+
 /* Get the cache entry with sector. If it does not exist in cache, read the
  * sector from disk and write it into a free cache entry. Evict a cache entry
  * if none are available. */
@@ -117,7 +140,7 @@ get_cache_entry (block_sector_t sector)
   for (int i = 0; i < CACHE_NUM_SECTORS; ++i)
   {
     cache_entry = cache + i;
-    if (cache_entry->sector == sector)
+    if (cache_entry->sector == sector && !cache_entry->free)
     {
       lock_release (&cache_lock);
       return cache_entry;
@@ -198,6 +221,7 @@ cache_read_thread (void *sector)
 {
   get_cache_entry (*(block_sector_t *) sector);
   free (sector);
+  --read_ahead_threads;
 }
 
 /* Get the cache_entry to evict. Evicts the least recently used cache entry
