@@ -31,24 +31,21 @@
 
 /* Indblocks in an inode or doubly indblock. */
 /* Why you gotta bust me preprocessor. */
-/* #define INDBLOCK_NUM_CHILDREN BLOCK_SECTOR_SIZE / sizeof (block_sector_t) */
-#define INDBLOCK_NUM_CHILDREN 128
+#define INDBLOCK_NUM_CHILDREN (BLOCK_SECTOR_SIZE / sizeof (block_sector_t))
 
 /* Max number of grandchildren for a doubly indblock. */
-#define DOUBLY_INDBLOCK_NUM_GRANDCHILDREN INDBLOCK_NUM_CHILDREN * \
-  INDBLOCK_NUM_CHILDREN
+#define DOUBLY_INDBLOCK_NUM_GRANDCHILDREN (INDBLOCK_NUM_CHILDREN * \
+  INDBLOCK_NUM_CHILDREN)
 
-/* Sector inclusive boundaries for dblocks and indblocks. */
-/* Preprocessor is super wack. If I use the commented line, tests fail. */
-/* #define DBLOCK_END_BOUND INODE_NUM_DBLOCKS - 1 */
-#define DBLOCK_END_BOUND 11
-/* Add 1 for indblock itself. This is wack as well. */
-/* #define INDBLOCK_END_BOUND DBLOCK_END_BOUND + INDBLOCK_NUM_CHILDREN */
-#define INDBLOCK_END_BOUND 140
+/* Sector inclusive boundary for dblocks. */
+#define DBLOCK_END_BOUND (INODE_NUM_DBLOCKS - 1)
+
+/* Sector inclusive boundary for indblock. Add 1 for indblock itself. */
+#define INDBLOCK_END_BOUND (DBLOCK_END_BOUND + INDBLOCK_NUM_CHILDREN + 1)
 
 /* Max number of sectors a file can contain. Add one for doubly indblock itself. */
-#define FILE_MAX_SECTORS INDBLOCK_END_BOUND + INDBLOCK_NUM_CHILDREN + \
-  DOUBLY_INDBLOCK_NUM_GRANDCHILDREN + 1
+#define FILE_MAX_SECTORS (INDBLOCK_END_BOUND + INDBLOCK_NUM_CHILDREN + \
+  DOUBLY_INDBLOCK_NUM_GRANDCHILDREN + 1)
 
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
