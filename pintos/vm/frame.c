@@ -61,7 +61,7 @@ falloc (struct page *page, enum palloc_flags flags)
   /* If page is unmodified and comes from a file, evict the page to
    * filesys. Check upage and kpage dirty bit, since
    * they are both aliased to the same frame. */
-  int32_t *pagedir = get_thread (evict_page->tid)->pagedir;
+  uint32_t *pagedir = get_thread (evict_page->tid)->pagedir;
   if (!pagedir_is_dirty (pagedir, evict_page->upage) &&
       !pagedir_is_dirty (pagedir, evict_page->kpage) &&
       evict_page->file)
