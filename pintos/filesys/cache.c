@@ -110,7 +110,7 @@ cache_write_partial (block_sector_t sector, const void *buffer, int sector_ofs,
 {
   ASSERT (sector_ofs + size <= BLOCK_SECTOR_SIZE);
 
-  /* printf ("cache write at sector %d\n", sector); */
+  /* printf ("cache write at sector %d ofs %d size %d\n", sector, sector_ofs, size); */
 
   struct cache_entry *cache_entry = get_cache_entry (sector);
 

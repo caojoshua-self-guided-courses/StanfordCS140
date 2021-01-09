@@ -37,6 +37,9 @@
 #define DOUBLY_INDBLOCK_NUM_GRANDCHILDREN (INDBLOCK_NUM_CHILDREN * \
   INDBLOCK_NUM_CHILDREN)
 
+/* Number of all nested children for a doubly indblock. */
+#define DOUBLY_INDBLOCK_NUM_CHILDREN (INDBLOCK_NUM_CHILDREN * (1 + INDBLOCK_NUM_CHILDREN))
+
 /* Sector inclusive boundary for dblocks. */
 #define DBLOCK_END_BOUND INODE_NUM_DBLOCKS
 
@@ -420,7 +423,6 @@ inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
   unsigned sector_num = cur_last_sector_num;
 
   /* Set the inode_disk new length. */
-  /* printf ("extend inode from %d to %d\n", inode_disk->length, new_length); */
   inode_disk->length = new_length;
 
   /* Return if file extension does not require allocating more sectors. */
@@ -489,6 +491,9 @@ inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
       ++sector_num;
     }
 
+    /* Sanity check. */
+    ASSERT (sector_num == INDBLOCK_END_BOUND || sector_num == new_last_sector_num);
+
     /* Return if done writing sectors. */
     if (new_last_sector_num <= INDBLOCK_END_BOUND)
     {
@@ -499,41 +504,58 @@ inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
 
 
   /***** Write doubly indirect block and its children. *****/
-
-  /* Compute needed number of doubly indblock child blocks. */
-  size_t sectors_to_write = new_last_sector_num - INDBLOCK_END_BOUND - 1;
-
-  /* Write doubly indblock and its children. */
-  /* TODO: also allow file extension. */
   if (sector_num <= FILE_MAX_SECTORS)
   {
     /* Write to inode_disk doubly indblock. */
-    inode_disk->doubly_indblock = sectors[sector_num];
+    if (sector_num == INDBLOCK_END_BOUND)
+    {
+      inode_disk->doubly_indblock = sectors[sector_num - cur_last_sector_num];
+      ++sector_num;
+    }
   
-    /* Compute number of doubly indblock immediate children, and write to
-     * disk. */
-    size_t doubly_indblock_direct_children = DIV_ROUND_UP (sectors_to_write,
-        INDBLOCK_NUM_CHILDREN * (INDBLOCK_NUM_CHILDREN + 1));
-    cache_write_partial (inode_disk->doubly_indblock, sectors + sector_num + 1,
-        0, doubly_indblock_direct_children * sizeof (block_sector_t));
-    ++sector_num;
+    /* Compute number of doubly indblock children. */
+    size_t doubly_indblock_all_children = new_last_sector_num - sector_num;
+    size_t doubly_indblock_direct_children = DIV_ROUND_UP (doubly_indblock_all_children,
+        DOUBLY_INDBLOCK_NUM_CHILDREN);
+    size_t doubly_indblock_grandchildren = doubly_indblock_all_children -
+      doubly_indblock_direct_children;
+
+    /* Write doubly indblock direct children to disk. */
+    cache_write_partial (inode_disk->doubly_indblock,
+        sectors + sector_num - cur_last_sector_num,
+        (sector_num - INDBLOCK_END_BOUND - 1) * sizeof (block_sector_t),
+        doubly_indblock_direct_children * sizeof (block_sector_t));
+    unsigned direct_child_sector_num = sector_num;
+    sector_num += doubly_indblock_direct_children;
 
     /* Write doubly indblock children. */
-    for (unsigned i = 0; i < doubly_indblock_direct_children; ++i)
+    unsigned last_direct_child_sector_num = direct_child_sector_num +
+      doubly_indblock_direct_children;
+    while (direct_child_sector_num < last_direct_child_sector_num)
     {
       /* Compute direct blocks to write. */
-      block_sector_t direct_blocks_to_write = sectors_to_write <= INDBLOCK_NUM_CHILDREN ?
-        sectors_to_write : INDBLOCK_NUM_CHILDREN;
-      block_sector_t last_dblock_to_write = sector_num + direct_blocks_to_write;
+      unsigned direct_blocks_to_write = doubly_indblock_grandchildren <=
+        INDBLOCK_NUM_CHILDREN ? doubly_indblock_grandchildren : INDBLOCK_NUM_CHILDREN;
+      unsigned last_dblock_to_write = sector_num + direct_blocks_to_write;
+
+      /* Compute offset. */
+      off_t ofs = ((sector_num - INDBLOCK_END_BOUND - 1 -
+        doubly_indblock_direct_children) % INDBLOCK_NUM_CHILDREN) *
+        sizeof (block_sector_t);
 
       /* Write the indblock (doubly indblock child). */
-      cache_write_partial (sectors[sector_num], sectors + sector_num + 1, 0, direct_blocks_to_write
-          * sizeof (block_sector_t));
-      ++sector_num;
+      cache_write_partial (sectors[direct_child_sector_num - cur_last_sector_num],
+          sectors + sector_num - cur_last_sector_num,
+          ofs,
+          direct_blocks_to_write * sizeof (block_sector_t));
 
       /* Fill data blocks with zeros. */
       while (sector_num < last_dblock_to_write)
-        cache_write (sectors[sector_num++], zeros);
+      {
+        cache_write (sectors[sector_num - cur_last_sector_num], zeros);
+        ++sector_num;
+      }
+      ++direct_child_sector_num;
     }
 
     /* Sanity Check. */
