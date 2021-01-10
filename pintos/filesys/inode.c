@@ -55,13 +55,12 @@
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk
   {
-    block_sector_t start;               /* First data sector. */
     off_t length;                       /* File size in bytes. */
     block_sector_t dblocks[INODE_NUM_DBLOCKS];
     block_sector_t indblock;
     block_sector_t doubly_indblock;
     unsigned magic;                     /* Magic number. */
-    uint32_t unused[111];               /* Not used. */
+    uint32_t unused[112];               /* Not used. */
   };
 
 /* In-memory inode. */
