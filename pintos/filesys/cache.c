@@ -1,11 +1,11 @@
 #include "filesys/cache.h"
+#include "devices/timer.h"
 #include "lib/kernel/list.h"
 #include "lib/stdio.h"
 #include "lib/string.h"
 #include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/synch.h"
-#include "devices/timer.h"
 
 #define CACHE_NUM_SECTORS 64
 #define INVALID_SECTOR -1
