@@ -22,6 +22,7 @@ struct process
   pid_t parent_pid;
   char file_name[16];
   struct file *executable;
+  struct dir *dir;            /* Current directory. */
   bool loaded_success;
   bool is_waited_on;
   struct list fd_map;

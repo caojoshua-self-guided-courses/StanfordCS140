@@ -3,6 +3,7 @@
 #include <syscall-nr.h>
 #include "devices/input.h"
 #include "devices/shutdown.h"
+#include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "lib/string.h"
@@ -71,6 +72,16 @@ validate_string (const void *string)
   validate_uaddr (string + strlen (string));
 }
 
+/* Creates a file or directory. Called by sys open and create. */
+static bool
+create_generic (const char *name, int initial_size, bool is_dir)
+{
+  validate_string (name);
+  acquire_filesys_syscall_lock ();
+  bool result = filesys_create (name, initial_size, is_dir);
+  release_filesys_syscall_lock ();
+  return result;
+}
 
 /********** SYSTEM CALLS **********/
 
@@ -95,6 +106,8 @@ exit (int status)
   if (process)
   {
     process->status = status;
+    if (process->dir)
+      dir_close (process->dir);
     clean_mapids ();
     clean_fds ();
   }
@@ -138,11 +151,7 @@ wait (pid_t pid)
 static bool
 create (const char *file, unsigned initial_size)
 {
-  validate_string (file);
-  acquire_filesys_syscall_lock ();
-  bool result = filesys_create (file, initial_size);
-  release_filesys_syscall_lock ();
-  return result;
+  return create_generic (file, initial_size, false);
 }
 
 static bool
@@ -323,6 +332,12 @@ munmap (int mapid)
   release_filesys_syscall_lock ();
 }
 
+static bool
+mkdir (const char *dir)
+{
+  return create_generic (dir, 0, true);
+}
+
 static void
 syscall_handler (struct intr_frame *f) 
 {
@@ -393,6 +408,10 @@ syscall_handler (struct intr_frame *f)
     case SYS_MUNMAP:
       validate_args (esp, 1);
       munmap (*(int *)(esp + 4));
+      break;
+    case SYS_MKDIR:
+      validate_args (esp, 1);
+      mkdir (*(const char **) (esp + 4));
       break;
     default:
       thread_exit();

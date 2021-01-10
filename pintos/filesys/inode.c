@@ -56,11 +56,12 @@
 struct inode_disk
   {
     off_t length;                       /* File size in bytes. */
+    bool is_dir;                        /* True if is directory. */
     block_sector_t dblocks[INODE_NUM_DBLOCKS];
     block_sector_t indblock;
     block_sector_t doubly_indblock;
     unsigned magic;                     /* Magic number. */
-    uint32_t unused[112];               /* Not used. */
+    uint32_t unused[111];               /* Not used. */
   };
 
 /* In-memory inode. */
@@ -184,11 +185,11 @@ inode_init (void)
 
 /* Initializes an inode with LENGTH bytes of data and
    writes the new inode to sector SECTOR on the file system
-   device.
+   device. is_dir is true if its directory, false otherwise.
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
 bool
-inode_create (block_sector_t sector, off_t length)
+inode_create (block_sector_t sector, off_t length, bool is_dir)
 {
   struct inode_disk *inode_disk = NULL;
   bool success = false;
@@ -203,6 +204,7 @@ inode_create (block_sector_t sector, off_t length)
   if (inode_disk != NULL)
     {
       inode_disk->length = 0;
+      inode_disk->is_dir = is_dir;
       inode_disk->magic = INODE_MAGIC;
       if (inode_disk_extend (inode_disk, length))
         cache_write (sector, inode_disk);

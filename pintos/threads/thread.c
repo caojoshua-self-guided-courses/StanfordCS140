@@ -608,6 +608,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->nice = thread_get_nice ();
   t->recent_cpu = 0;
   t->stack_pages = 0;
+  t->process = NULL;
 
   if (thread_mlfqs)
     thread_update_mlfqs_priority(t);

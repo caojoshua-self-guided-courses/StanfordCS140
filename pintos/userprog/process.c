@@ -40,7 +40,7 @@ get_process (pid_t pid)
   return NULL;
 }
 
-/* Clean up a process */
+/* Clean up a process. */
 static void
 clean_process (pid_t pid)
 {
@@ -92,9 +92,16 @@ process_execute (const char *file_name)
   {
     /* setting status to -1 will ensure correct status in case
      * it is terminated by the kernel */
+    struct thread *parent_thread = thread_current();
     process->status = -1;
-    process->parent_pid = thread_current ()->tid;
+    process->parent_pid = parent_thread->tid;
     process->is_waited_on = false;
+
+    if (parent_thread->process && parent_thread->process->dir)
+      process->dir = dir_reopen (parent_thread->process->dir);
+    else
+      process->dir = dir_open_root();
+
     list_init (&process->fd_map);
     hash_init (&process->mapid_map, mapid_hash, mapid_less, NULL);
 		hash_init (&process->spage_table, page_hash, page_less, NULL); 
