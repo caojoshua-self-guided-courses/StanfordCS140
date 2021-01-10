@@ -141,20 +141,26 @@ byte_to_sector (const struct inode_disk *inode_disk, off_t pos)
   sector_num -= INODE_NUM_DBLOCKS;
   if (sector_num < INDBLOCK_NUM_CHILDREN)
   {
-    block_sector_t indblock[INDBLOCK_NUM_CHILDREN];
+    block_sector_t *indblock = malloc (INDBLOCK_NUM_CHILDREN *
+        sizeof (block_sector_t));
     cache_read (inode_disk->indblock, indblock);
-    return indblock[sector_num];
+    block_sector_t sector = indblock[sector_num];
+    free (indblock);
+    return sector;
   }
 
   /* Doubly Indblock. */
   sector_num -= INDBLOCK_NUM_CHILDREN;
   if (sector_num < DOUBLY_INDBLOCK_NUM_GRANDCHILDREN)
   {
-    block_sector_t indblock[BLOCK_SECTOR_SIZE];
+    block_sector_t *indblock = malloc (INDBLOCK_NUM_CHILDREN *
+        sizeof (block_sector_t));
     cache_read (inode_disk->doubly_indblock, indblock);
-
     cache_read (indblock[sector_num / INDBLOCK_NUM_CHILDREN], indblock);
-    return indblock[sector_num % INDBLOCK_NUM_CHILDREN];
+
+    block_sector_t sector = indblock[sector_num % INDBLOCK_NUM_CHILDREN];
+    free (indblock);
+    return sector;
   }
 
   /* Accessing sector beyond the max possible sector size. */
@@ -615,8 +621,7 @@ inode_disk_free (struct inode_disk *inode_disk)
 
 
   /* Indblock. */
-  block_sector_t *indblock = malloc (BLOCK_SECTOR_SIZE *
-      sizeof (block_sector_t));
+  block_sector_t *indblock = malloc (BLOCK_SECTOR_SIZE);
 
   cache_read (inode_disk->indblock, indblock);
   inode_disk_free_sector (inode_disk->indblock, &sectors_left);
@@ -640,8 +645,7 @@ inode_disk_free (struct inode_disk *inode_disk)
   inode_disk_free_sector (inode_disk->doubly_indblock, &sectors_left);
 
   unsigned i = 0;
-  block_sector_t *nested_indblock = malloc (BLOCK_SECTOR_SIZE *
-      sizeof (block_sector_t));
+  block_sector_t *nested_indblock = malloc (BLOCK_SECTOR_SIZE);
   while (sectors_left > 0)
   {
     cache_read (indblock[i], nested_indblock); 
