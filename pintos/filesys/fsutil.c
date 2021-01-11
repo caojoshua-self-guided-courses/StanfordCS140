@@ -15,11 +15,23 @@
 void
 fsutil_ls (char **argv UNUSED) 
 {
-  struct dir *dir;
+  fsutil_ls_subdir ("/");
+}
+
+/* List files in the directory named NAME. */
+void
+fsutil_ls_subdir (char *dir_name) 
+{
+  struct dir *dir = filesys_open_dir (dir_name);
+  if (!dir)
+  {
+    printf ("No directory named %s\n", dir_name);
+    return;
+  }
+
   char name[NAME_MAX + 1];
   
-  printf ("Files in the root directory:\n");
-  dir = dir_open_root ();
+  printf ("Files in the %s:\n", dir_name);
   if (dir == NULL)
     PANIC ("root dir open failed");
   while (dir_readdir (dir, name))

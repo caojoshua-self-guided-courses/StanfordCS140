@@ -4,7 +4,9 @@
 #include <list.h>
 #include "filesys/filesys.h"
 #include "filesys/inode.h"
+#include "threads/thread.h"
 #include "threads/malloc.h"
+#include "userprog/process.h"
 
 /* A directory. */
 struct dir 
@@ -21,12 +23,28 @@ struct dir_entry
     bool in_use;                        /* In use or free? */
   };
 
-/* Creates a directory with space for ENTRY_CNT entries in the
-   given SECTOR.  Returns true if successful, false on failure. */
-bool
-dir_create (block_sector_t sector, size_t entry_cnt)
+/* Inits directory with sector SECTOR and parent dir with sector
+ * PARENT_SECTOR. */
+static void
+dir_init (block_sector_t sector, block_sector_t parent_sector)
 {
-  return inode_create (sector, entry_cnt * sizeof (struct dir_entry), true);
+  struct dir *dir = dir_open (inode_open (sector));
+  if (!dir)
+    return;
+  /* Pass CURRENT_DIR and PARENT_DIR as false since they are not new
+   * directories. */
+  dir_add (dir, CURRENT_DIR, sector, false);
+  dir_add (dir, PARENT_DIR, parent_sector, false);
+}
+
+/* Creates the root directory. */
+bool
+dir_create_root ()
+{
+  bool result = inode_create (ROOT_DIR_SECTOR, 0, true);
+  if (result)
+    dir_init (ROOT_DIR_SECTOR, ROOT_DIR_SECTOR);
+  return result;
 }
 
 /* Opens and returns the directory for the given INODE, of which
@@ -139,7 +157,7 @@ dir_lookup (const struct dir *dir, const char *name,
    Fails if NAME is invalid (i.e. too long) or a disk or memory
    error occurs. */
 bool
-dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
+dir_add (struct dir *dir, const char *name, block_sector_t inode_sector, bool is_dir)
 {
   struct dir_entry e;
   off_t ofs;
@@ -173,6 +191,10 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   strlcpy (e.name, name, sizeof e.name);
   e.inode_sector = inode_sector;
   success = inode_write_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
+
+  /* Init directory. */
+  if (success && is_dir)
+    dir_init (inode_sector, inode_get_sector (dir->inode));
 
  done:
   return success;
@@ -233,4 +255,19 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
         } 
     }
   return false;
+}
+
+/* Open the current directory of the thread. If its a thread without a process
+ * (kernel thread), return the root directory. For user processes, reopen its
+ * current directory and return it. */
+struct dir *
+dir_open_current ()
+{
+  struct dir *dir;
+  struct process *process = thread_current ()->process;
+  if (process && process->dir)
+    dir = dir_reopen (process->dir);
+  else
+    dir = dir_open_root();
+  return dir;
 }

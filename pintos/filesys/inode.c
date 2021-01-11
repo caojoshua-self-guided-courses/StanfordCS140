@@ -420,6 +420,15 @@ inode_allow_write (struct inode *inode)
   inode->deny_write_cnt--;
 }
 
+/* Returns the inodes sector. */
+block_sector_t
+inode_get_sector (const struct inode *inode)
+{
+  if (inode)
+    return inode->sector;
+  return -1;
+}
+
 /* Returns the length, in bytes, of INODE's data. */
 off_t
 inode_length (const struct inode *inode)

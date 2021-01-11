@@ -2,6 +2,7 @@
 #define FILESYS_FSUTIL_H
 
 void fsutil_ls (char **argv);
+void fsutil_ls_subdir (char *name);
 void fsutil_cat (char **argv);
 void fsutil_rm (char **argv);
 void fsutil_extract (char **argv);

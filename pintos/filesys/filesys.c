@@ -10,9 +10,6 @@
 #include "threads/thread.h"
 #include "userprog/process.h"
 
-#define CURRENT_DIR "."
-#define PARENT_DIR ".."
-
 struct directory;
 
 /* Partition that contains the file system. */
@@ -65,7 +62,7 @@ filesys_create (const char *full_name, off_t initial_size, bool is_dir)
   bool success = (dir != NULL
                   && free_map_allocate (1, &inode_sector)
                   && inode_create (inode_sector, initial_size, is_dir)
-                  && dir_add (dir, name, inode_sector));
+                  && dir_add (dir, name, inode_sector, is_dir));
   if (!success && inode_sector != 0) 
     free_map_release (inode_sector, 1);
   dir_close (dir);
@@ -135,7 +132,7 @@ do_format (void)
 {
   printf ("Formatting file system...");
   free_map_create ();
-  if (!dir_create (ROOT_DIR_SECTOR, 16))
+  if (!dir_create_root ())
     PANIC ("root directory creation failed");
   free_map_close ();
   printf ("done.\n");
@@ -156,7 +153,6 @@ parse_name (const char *name, struct dir **dir_, char *name_)
   strlcpy (name_cpy, name, len);
 
   struct dir *dir;
-  struct process *process = thread_current ()->process;
 
   char *save_ptr, *next;
   char *token = strtok_r (name_cpy, "/", &save_ptr);
@@ -169,7 +165,7 @@ parse_name (const char *name, struct dir **dir_, char *name_)
     if (!token)
     {
       *dir_ = dir;
-      memcpy (name_, CURRENT_DIR, strlen(CURRENT_DIR));
+      strlcpy (name_, CURRENT_DIR, strlen(CURRENT_DIR) + 1);
       return true;
     }
     ++name_cpy;
@@ -179,12 +175,9 @@ parse_name (const char *name, struct dir **dir_, char *name_)
     /* If null token, file name is invalid. */
     if (!token)
       return false;
-    /* Open the file from the process's current directory. */
-    else if (process && process->dir)
-      dir = dir_reopen (process->dir);
-    /* If process directory is unavailible, open from root. */
+    /* Open the thread's current directory. */
     else
-      dir = dir_open_root();
+      dir = dir_open_current ();
   }
 
   /* Iterate through subdirectories. */
@@ -224,6 +217,7 @@ parse_name (const char *name, struct dir **dir_, char *name_)
   }
 
   *dir_ = dir;
+  strlcpy (name_, token, token_len);
   memcpy (name_, token, token_len);
   return true;
 }
