@@ -10,11 +10,15 @@
 #include "threads/thread.h"
 #include "userprog/process.h"
 
+#define CURRENT_DIR "."
+#define PARENT_DIR ".."
+
 struct directory;
 
 /* Partition that contains the file system. */
 struct block *fs_device;
 
+static struct inode * filesys_open_internal (const char *name);
 static void do_format (void);
 static bool parse_name (const char *name, struct dir **dir_, char *name_);
 
@@ -69,22 +73,46 @@ filesys_create (const char *full_name, off_t initial_size, bool is_dir)
   return success;
 }
 
-/* Opens the file with the given NAME.
-   Returns the new file if successful or a null pointer
+/* Opens the inode with the given NAME.
+   Returns the new inode if successful or a null pointer
    otherwise.
-   Fails if no file named NAME exists,
+   Fails if no inode named NAME exists,
    or if an internal memory allocation fails. */
-struct file *
-filesys_open (const char *name)
+static struct inode *
+filesys_open_internal (const char *full_name)
 {
-  struct dir *dir = dir_open_root ();
+  struct dir *dir = NULL;
+  char name[NAME_MAX + 1];
+
+  if (!parse_name (full_name, &dir, name))
+    return NULL;
+
   struct inode *inode = NULL;
 
   if (dir != NULL)
     dir_lookup (dir, name, &inode);
   dir_close (dir);
 
-  return file_open (inode);
+  return inode;
+}
+
+/* Opens the file with the given NAME. Return NULL if unsuccessful. */
+struct file *
+filesys_open (const char *name)
+{
+  struct inode *inode = filesys_open_internal (name);
+  if (inode && !inode_is_dir (inode))
+    return file_open (inode);
+  return NULL;
+}
+
+struct dir *
+filesys_open_dir (const char *name)
+{
+  struct inode *inode = filesys_open_internal (name);
+  if (inode && inode_is_dir (inode))
+    return dir_open (inode);
+  return NULL;
 }
 
 /* Deletes the file named NAME.
@@ -113,9 +141,13 @@ do_format (void)
   printf ("done.\n");
 }
 
-/* Parses name to store the directory in dir_ and file name in name_. Returns
- * true if successful. */
+/* Parses name to store the directory in dir_ and the last file name in name_.
+ * Returns true if successful.
+ *
+ * For example, if given name = "/a/b/c", dir_ will be set to dir /a/b, and
+ * name_ will be set to "c". */
 static bool
+/* parse_name (const char *name, struct dir **dir_, char name_[NAME_MAX + 1]) */
 parse_name (const char *name, struct dir **dir_, char *name_)
 {
   /* Copy name to ensure const. */
@@ -125,28 +157,47 @@ parse_name (const char *name, struct dir **dir_, char *name_)
 
   struct dir *dir;
   struct process *process = thread_current ()->process;
-  
-  /* Set the directory in which to search for name. */
+
+  char *save_ptr, *next;
+  char *token = strtok_r (name_cpy, "/", &save_ptr);
+
+  /* Special case in which we start in the root dir. */
   if (*name_cpy == '/')
   {
     dir = dir_open_root();
+    /* If token is null, file is just regex /+, or the root dir. */
+    if (!token)
+    {
+      *dir_ = dir;
+      memcpy (name_, CURRENT_DIR, strlen(CURRENT_DIR));
+      return true;
+    }
     ++name_cpy;
   }
-  else if (process && process->dir)
-    dir = dir_reopen (process->dir);
   else
-    dir = dir_open_root();
+  {
+    /* If null token, file name is invalid. */
+    if (!token)
+      return false;
+    /* Open the file from the process's current directory. */
+    else if (process && process->dir)
+      dir = dir_reopen (process->dir);
+    /* If process directory is unavailible, open from root. */
+    else
+      dir = dir_open_root();
+  }
 
   /* Iterate through subdirectories. */
-  char *save_ptr, *next;
-  char *token = strtok_r (name_cpy, "/", &save_ptr);
   while (true)
   {
+    /* If next token is NULL, break out of the loop. */
     next = strtok_r (NULL, "/", &save_ptr);
     if (!next)
       break;
 
     struct inode *inode;
+
+    /* If the next token does not exist, return error. */
     if (!dir_lookup (dir, token, &inode))
     {
       dir_close (dir);
@@ -154,14 +205,25 @@ parse_name (const char *name, struct dir **dir_, char *name_)
     }
 
     dir_close (dir);
-    if (inode_is_dir (inode))
+
+    /* Move into the next subdirectory. */
+    if (inode && inode_is_dir (inode))
       dir = dir_open (inode);
+    /* If the next subdirectory isn't a directory, return an error. */
     else
       return false;
 
     token = next;
   }
+
+  size_t token_len = strlen (token) + 1;
+  if (token_len > NAME_MAX + 1)
+  {
+    dir_close (dir);
+    return false;
+  }
+
   *dir_ = dir;
-  memcpy (name_, token, strlen(token) + 1);
+  memcpy (name_, token, token_len);
   return true;
 }

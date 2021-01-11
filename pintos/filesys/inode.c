@@ -171,6 +171,8 @@ byte_to_sector (const struct inode_disk *inode_disk, off_t pos)
 static struct inode_disk *
 inode_get_data (const struct inode *inode)
 {
+  if (!inode)
+    return false;
   struct inode_disk *inode_disk = malloc (sizeof (struct inode_disk));
   cache_read (inode->sector, inode_disk);
   return inode_disk;
@@ -432,6 +434,8 @@ inode_length (const struct inode *inode)
 bool
 inode_is_dir (const struct inode *inode)
 {
+  if (!inode)
+    return false;
   struct inode_disk *inode_disk = inode_get_data (inode);
   bool is_dir = inode_disk->is_dir;
   free (inode_disk);
@@ -446,6 +450,7 @@ inode_is_dir (const struct inode *inode)
 static bool
 inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
 {
+  /* printf ("extend inode from %d to %d\n", inode_disk->length, new_length); */
   if (!inode_disk || new_length < inode_disk->length)
     return false;
 

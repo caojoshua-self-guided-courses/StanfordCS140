@@ -333,6 +333,24 @@ munmap (int mapid)
 }
 
 static bool
+chdir (const char *dir_name)
+{
+  struct dir *dir = filesys_open_dir (dir_name);
+  if (dir)
+  {
+    struct process *p = thread_current ()->process;
+    if (p)
+    {
+      if (p->dir)
+      dir_close (p->dir);
+      p->dir = dir;
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool
 mkdir (const char *dir)
 {
   return create_generic (dir, 0, true);
