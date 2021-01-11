@@ -409,9 +409,19 @@ syscall_handler (struct intr_frame *f)
       validate_args (esp, 1);
       munmap (*(int *)(esp + 4));
       break;
+    case SYS_CHDIR:
+      validate_args (esp, 1);
+      chdir (*(const char **) (esp + 4));
+      break;
     case SYS_MKDIR:
       validate_args (esp, 1);
       mkdir (*(const char **) (esp + 4));
+      break;
+    case SYS_READDIR:
+      break;
+    case SYS_ISDIR:
+      break;
+    case SYS_INUMBER:
       break;
     default:
       thread_exit();

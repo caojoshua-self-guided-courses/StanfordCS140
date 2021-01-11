@@ -428,15 +428,25 @@ inode_length (const struct inode *inode)
   return length;
 }
 
+/* Returns if inode is a directory. */
+bool
+inode_is_dir (const struct inode *inode)
+{
+  struct inode_disk *inode_disk = inode_get_data (inode);
+  bool is_dir = inode_disk->is_dir;
+  free (inode_disk);
+  return is_dir;
+}
+
 /* Helper function to extend an inode. It writes sectors pointers into
  * inode_disk, writes indblock pointers to disk, and fills dblocks with zeros.
- * Returns if the size of the inode is sucessfully increased. 
+ * Returns if the size of the inode is the same or sucessfully increased. 
  * This should be called from inode_write_at to allow file extension, and
  * from inode_create, with inode_disk of length 0. */
 static bool
 inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
 {
-  if (!inode_disk || new_length <= inode_disk->length)
+  if (!inode_disk || new_length < inode_disk->length)
     return false;
 
   static char zeros[BLOCK_SECTOR_SIZE];

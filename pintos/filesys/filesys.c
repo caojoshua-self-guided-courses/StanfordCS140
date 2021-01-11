@@ -6,11 +6,17 @@
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "threads/malloc.h"
+#include "threads/thread.h"
+#include "userprog/process.h"
+
+struct directory;
 
 /* Partition that contains the file system. */
 struct block *fs_device;
 
 static void do_format (void);
+static bool parse_name (const char *name, struct dir **dir_, char *name_);
 
 /* Initializes the file system module.
    If FORMAT is true, reformats the file system. */
@@ -43,10 +49,15 @@ filesys_done (void)
    Fails if a file named NAME already exists,
    or if internal memory allocation fails. */
 bool
-filesys_create (const char *name, off_t initial_size, bool is_dir)
+filesys_create (const char *full_name, off_t initial_size, bool is_dir)
 {
   block_sector_t inode_sector = 0;
-  struct dir *dir = dir_open_root ();
+  struct dir *dir = NULL;
+  char name[NAME_MAX + 1];
+
+  if (!parse_name (full_name, &dir, name))
+    return false;
+
   bool success = (dir != NULL
                   && free_map_allocate (1, &inode_sector)
                   && inode_create (inode_sector, initial_size, is_dir)
@@ -100,4 +111,57 @@ do_format (void)
     PANIC ("root directory creation failed");
   free_map_close ();
   printf ("done.\n");
+}
+
+/* Parses name to store the directory in dir_ and file name in name_. Returns
+ * true if successful. */
+static bool
+parse_name (const char *name, struct dir **dir_, char *name_)
+{
+  /* Copy name to ensure const. */
+  size_t len = strlen (name) + 1;
+  char *name_cpy = malloc (len);
+  strlcpy (name_cpy, name, len);
+
+  struct dir *dir;
+  struct process *process = thread_current ()->process;
+  
+  /* Set the directory in which to search for name. */
+  if (*name_cpy == '/')
+  {
+    dir = dir_open_root();
+    ++name_cpy;
+  }
+  else if (process && process->dir)
+    dir = dir_reopen (process->dir);
+  else
+    dir = dir_open_root();
+
+  /* Iterate through subdirectories. */
+  char *save_ptr, *next;
+  char *token = strtok_r (name_cpy, "/", &save_ptr);
+  while (true)
+  {
+    next = strtok_r (NULL, "/", &save_ptr);
+    if (!next)
+      break;
+
+    struct inode *inode;
+    if (!dir_lookup (dir, token, &inode))
+    {
+      dir_close (dir);
+      return false;
+    }
+
+    dir_close (dir);
+    if (inode_is_dir (inode))
+      dir = dir_open (inode);
+    else
+      return false;
+
+    token = next;
+  }
+  *dir_ = dir;
+  memcpy (name_, token, strlen(token) + 1);
+  return true;
 }
