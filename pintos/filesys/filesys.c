@@ -45,9 +45,10 @@ filesys_done (void)
   free_map_close ();
 }
 
-/* Creates a file named NAME with the given INITIAL_SIZE.
+/* Creates a file or directory named NAME with the given INITIAL_SIZE.
    Returns true if successful, false otherwise.
    Fails if a file named NAME already exists,
+   the subdirectory to the path does not exist,
    or if internal memory allocation fails. */
 bool
 filesys_create (const char *full_name, off_t initial_size, bool is_dir)

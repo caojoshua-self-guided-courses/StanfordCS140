@@ -444,17 +444,17 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_CHDIR:
       validate_args (esp, 1);
-      chdir (*(const char **) (esp + 4));
+      f->eax = chdir (*(const char **) (esp + 4));
       break;
     case SYS_MKDIR:
       validate_args (esp, 1);
-      mkdir (*(const char **) (esp + 4));
+      f->eax = mkdir (*(const char **) (esp + 4));
       break;
     case SYS_READDIR:
       break;
     case SYS_ISDIR:
       validate_args (esp, 1);
-      isdir (*(int *)(esp + 4));
+      f->eax = isdir (*(int *)(esp + 4));
       break;
     case SYS_INUMBER:
       break;
