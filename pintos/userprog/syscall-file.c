@@ -5,6 +5,7 @@
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/inode.h"
 #include "threads/malloc.h"
 #include "threads/vaddr.h"
 #include "vm/page.h"
@@ -131,6 +132,17 @@ fd_close_file (struct file_descriptor *fd)
     file_close (fd->file.file);
 }
 
+/* Gets the inumber/sector_idx in fd. */
+int
+fd_get_inumber (struct file_descriptor *fd)
+{
+  struct inode *inode;
+  if (fd->is_dir)
+    inode = dir_get_inode (fd->file.dir);
+  else
+    inode = file_get_inode (fd->file.file);
+  return inode_get_sector (inode);
+}
 
 /***** Map ID *****/
 

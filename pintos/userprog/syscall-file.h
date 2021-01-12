@@ -35,6 +35,7 @@ void clean_fds (void);
 struct file_descriptor* get_file_descriptor (int fd);
 bool fd_open_file (struct file_descriptor *fd, const char *name);
 void fd_close_file (struct file_descriptor *fd);
+int fd_get_inumber (struct file_descriptor *fd);
 
 /* Map ID functions. */
 unsigned mapid_hash (const struct hash_elem *m_, void *aux UNUSED);

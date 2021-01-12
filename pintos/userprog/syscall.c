@@ -358,11 +358,17 @@ mkdir (const char *dir)
   return create_generic (dir, 0, true);
 }
 
-/* static bool */
-/* readdir (int fd, char *name) */
-/* { */
-/*   return false; */
-/* } */
+static bool
+readdir (int fd, char *name)
+{
+  bool result = false;
+  acquire_filesys_syscall_lock ();
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  if (file_descriptor && file_descriptor->is_dir)
+    result = dir_readdir (file_descriptor->file.dir, name);
+  release_filesys_syscall_lock ();
+  return result;
+}
 
 static bool
 isdir (int fd)
@@ -372,6 +378,17 @@ isdir (int fd)
   struct file_descriptor *file_descriptor = get_file_descriptor (fd);
   if (file_descriptor)
     result = file_descriptor->is_dir;
+  release_filesys_syscall_lock ();
+  return result;
+}
+
+static int
+inumber (int fd)
+{
+  int result = -1;
+  acquire_filesys_syscall_lock ();
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  result = fd_get_inumber (file_descriptor);
   release_filesys_syscall_lock ();
   return result;
 }
@@ -456,12 +473,16 @@ syscall_handler (struct intr_frame *f)
       f->eax = mkdir (*(const char **) (esp + 4));
       break;
     case SYS_READDIR:
+      validate_args (esp, 2);
+      f->eax = readdir (*(int *) (esp + 4), *(char **) (esp + 8));
       break;
     case SYS_ISDIR:
       validate_args (esp, 1);
       f->eax = isdir (*(int *)(esp + 4));
       break;
     case SYS_INUMBER:
+      validate_args (esp, 1);
+      f->eax = inumber (*(int *)(esp + 4));
       break;
     default:
       thread_exit();
