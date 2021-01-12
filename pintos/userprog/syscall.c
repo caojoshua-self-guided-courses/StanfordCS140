@@ -177,11 +177,11 @@ open (const char *file)
 static int
 filesize (int fd)
 {
+  int filesize = -1;
   acquire_filesys_syscall_lock ();
   struct file_descriptor *file_descriptor = get_file_descriptor (fd);
-  int filesize = -1;
-  if (file_descriptor)
-    filesize = file_length (file_descriptor->file);
+  if (file_descriptor && !file_descriptor->is_dir)
+      filesize = file_length (file_descriptor->file.file);
   release_filesys_syscall_lock ();
   return filesize;
 }
@@ -204,11 +204,8 @@ read (int fd, void *buffer, unsigned size)
   else
   {
     struct file_descriptor *file_descriptor = get_file_descriptor (fd);
-    if (file_descriptor)
-      /* This could crash the kernel if accessing the buffer creates a page fault.
-       * Usually we shouldn't allow page faults when accessing device drivers,
-       * but testcases don't test this so whatevs. */
-      read_bytes = file_read (file_descriptor->file, buffer, size);
+    if (file_descriptor && !file_descriptor->is_dir)
+      read_bytes = file_read (file_descriptor->file.file, buffer, size);
   }
   release_filesys_syscall_lock ();
   return read_bytes;
@@ -230,9 +227,8 @@ write (int fd, const void *buffer, unsigned size)
   else
   {
     struct file_descriptor *file_descriptor = get_file_descriptor (fd);
-    if (file_descriptor)
-      /* This could cause a kernel crash. See comment in read. */
-      write_bytes = file_write (file_descriptor->file, buffer, size);
+    if (file_descriptor && !file_descriptor->is_dir)
+      write_bytes = file_write (file_descriptor->file.file, buffer, size);
   }
   release_filesys_syscall_lock ();
   return write_bytes;
@@ -243,8 +239,8 @@ seek (int fd, unsigned position)
 {
   acquire_filesys_syscall_lock ();
   struct file_descriptor *file_descriptor = get_file_descriptor(fd);
-  if (file_descriptor)
-    file_seek (file_descriptor->file, position);
+  if (file_descriptor && !file_descriptor->is_dir)
+    file_seek (file_descriptor->file.file, position);
   release_filesys_syscall_lock ();
 }
 
@@ -254,8 +250,8 @@ tell (int fd)
   unsigned pos = -1;
   acquire_filesys_syscall_lock ();
   struct file_descriptor *file_descriptor = get_file_descriptor(fd);
-  if (file_descriptor)
-    pos = file_tell (file_descriptor->file);
+  if (file_descriptor && !file_descriptor->is_dir)
+    pos = file_tell (file_descriptor->file.file);
   release_filesys_syscall_lock ();
   return pos;
 }
@@ -268,7 +264,7 @@ close (int fd)
   if (file_descriptor)
   {
     list_remove (&file_descriptor->elem);
-    file_close (file_descriptor->file);
+    fd_close_file (file_descriptor);
   }
   release_filesys_syscall_lock ();
 }
@@ -283,9 +279,10 @@ mmap (int fd, void *addr)
   int mapid = -1;
 
   struct mapid_entry *mapid_entry = create_mapid (fd, addr);
-  if (mapid_entry)
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  if (mapid_entry && file_descriptor && !file_descriptor->is_dir)
   {
-    struct file* file = get_file_descriptor (fd)->file;
+    struct file* file = file_descriptor->file.file;
     int len = file_length (file);
 
     /* Check that all pages are availible. It is more efficient to check in two
@@ -354,6 +351,24 @@ static bool
 mkdir (const char *dir)
 {
   return create_generic (dir, 0, true);
+}
+
+/* static bool */
+/* readdir (int fd, char *name) */
+/* { */
+/*   return false; */
+/* } */
+
+static bool
+isdir (int fd)
+{
+  bool result = false;
+  acquire_filesys_syscall_lock ();
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  if (file_descriptor)
+    result = file_descriptor->is_dir;
+  release_filesys_syscall_lock ();
+  return result;
 }
 
 static void
@@ -438,6 +453,8 @@ syscall_handler (struct intr_frame *f)
     case SYS_READDIR:
       break;
     case SYS_ISDIR:
+      validate_args (esp, 1);
+      isdir (*(int *)(esp + 4));
       break;
     case SYS_INUMBER:
       break;

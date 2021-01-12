@@ -4,11 +4,18 @@
 #include <hash.h>
 #include "userprog/process.h"
 
+union fd_file
+{
+  struct file *file;
+  struct dir *dir;
+};
+
 /* Elements of process->fd_map that map fd to files */
 struct file_descriptor
 {
   int fd;
-  struct file *file;
+  bool is_dir;
+  union fd_file file;
   struct list_elem elem;
 };
 
@@ -26,6 +33,8 @@ struct mapid_entry
 int create_fd (const char *file_name);
 void clean_fds (void);
 struct file_descriptor* get_file_descriptor (int fd);
+bool fd_open_file (struct file_descriptor *fd, const char *name);
+void fd_close_file (struct file_descriptor *fd);
 
 /* Map ID functions. */
 unsigned mapid_hash (const struct hash_elem *m_, void *aux UNUSED);

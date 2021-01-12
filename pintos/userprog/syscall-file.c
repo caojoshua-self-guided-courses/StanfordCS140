@@ -2,6 +2,7 @@
 #include <debug.h>
 #include <stdbool.h>
 #include <string.h>
+#include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "threads/malloc.h"
@@ -23,9 +24,6 @@ create_fd (const char *file_name)
 {
   if (!file_name)
     return -1;
-  struct file *file = filesys_open (file_name);
-  if (!file)
-    return -1;
 
   struct process *process = thread_current ()->process;
   if (process)
@@ -36,7 +34,8 @@ create_fd (const char *file_name)
     struct file_descriptor *file_descriptor = malloc (sizeof (struct file_descriptor));
     if (file_descriptor)
     {
-      file_descriptor->file = file;
+      if (!fd_open_file (file_descriptor, file_name))
+        return -1;
 
       /* Iterate through the fd list until there is an open fd */
       struct list_elem *e;
@@ -74,7 +73,7 @@ clean_fds (void)
       struct list_elem *temp = list_prev (e);
       list_remove (e);
       e = temp;
-      file_close (file_descriptor->file);
+      fd_close_file (file_descriptor);
       free (file_descriptor);
     }
   }
@@ -97,6 +96,39 @@ get_file_descriptor (int fd)
     }
   }
   return NULL;
+}
+
+/* Opens the file or directory indicated by name. Return true if successful. */
+bool
+fd_open_file (struct file_descriptor *fd, const char *name)
+{
+  struct file *file = filesys_open (name);
+  if (file)
+  {
+    fd->is_dir = false;
+    fd->file.file = file;
+    return true;
+  }
+
+  struct dir *dir = filesys_open_dir (name);
+  if (dir)
+  {
+    fd->is_dir = true;
+    fd->file.dir = dir;
+    return true;
+  }
+  
+  return false;
+}
+
+/* Closes the file or directory associated with fd. */
+void
+fd_close_file (struct file_descriptor *fd)
+{
+  if (fd->is_dir)
+    dir_close (fd->file.dir);
+  else
+    file_close (fd->file.file);
 }
 
 
@@ -148,7 +180,8 @@ create_mapid (int fd, void* addr)
 
   struct process *process = thread_current ()->process;
   struct file_descriptor *file_descriptor = get_file_descriptor (fd);
-  if (process && file_descriptor && file_length (file_descriptor->file) > 0)
+  if (process && file_descriptor && !file_descriptor->is_dir &&
+      file_length (file_descriptor->file.file) > 0)
   {
     /* Find an available mapid. */
     for (int i = 0; true; ++i)
@@ -157,7 +190,7 @@ create_mapid (int fd, void* addr)
       {
         struct mapid_entry *mapid = malloc (sizeof (struct mapid_entry));
         mapid->mapid = i;
-        mapid->file = file_reopen (file_descriptor->file);
+        mapid->file = file_reopen (file_descriptor->file.file);
         mapid->addr = addr;
         mapid->length = file_length (mapid->file);
         hash_insert (&process->mapid_map, &mapid->hash_elem);
