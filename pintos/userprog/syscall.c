@@ -227,8 +227,13 @@ write (int fd, const void *buffer, unsigned size)
   else
   {
     struct file_descriptor *file_descriptor = get_file_descriptor (fd);
-    if (file_descriptor && !file_descriptor->is_dir)
-      write_bytes = file_write (file_descriptor->file.file, buffer, size);
+    if (file_descriptor)
+    {
+      if (file_descriptor->is_dir)
+        write_bytes = -1;
+      else
+        write_bytes = file_write (file_descriptor->file.file, buffer, size);
+    }
   }
   release_filesys_syscall_lock ();
   return write_bytes;
