@@ -118,9 +118,14 @@ filesys_open_dir (const char *name)
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
 bool
-filesys_remove (const char *name) 
+filesys_remove (const char *full_name) 
 {
-  struct dir *dir = dir_open_root ();
+  struct dir *dir = NULL;
+  char name[NAME_MAX + 1];
+
+  if (!parse_name (full_name, &dir, name))
+    return false;
+
   bool success = dir != NULL && dir_remove (dir, name);
   dir_close (dir); 
 
@@ -178,7 +183,11 @@ parse_name (const char *name, struct dir **dir_, char *name_)
       return false;
     /* Open the thread's current directory. */
     else
+    {
       dir = dir_open_current ();
+      if (!dir)
+        return false;
+    }
   }
 
   /* Iterate through subdirectories. */

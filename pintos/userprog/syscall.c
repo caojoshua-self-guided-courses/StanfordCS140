@@ -365,7 +365,7 @@ readdir (int fd, char *name)
   acquire_filesys_syscall_lock ();
   struct file_descriptor *file_descriptor = get_file_descriptor (fd);
   if (file_descriptor && file_descriptor->is_dir)
-    result = dir_readdir (file_descriptor->file.dir, name);
+    result = dir_readdir_strict (file_descriptor->file.dir, name);
   release_filesys_syscall_lock ();
   return result;
 }

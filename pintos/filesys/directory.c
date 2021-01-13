@@ -31,7 +31,7 @@ dir_init (block_sector_t sector, block_sector_t parent_sector)
   struct dir *dir = dir_open (inode_open (sector));
   if (!dir)
     return;
-  /* Pass CURRENT_DIR and PARENT_DIR as false since they are not new
+  /* Pass CURRENT_DIR and PARENT_DIR with is_dir=false since they are not new
    * directories. */
   dir_add (dir, CURRENT_DIR, sector, false);
   dir_add (dir, PARENT_DIR, parent_sector, false);
@@ -157,7 +157,8 @@ dir_lookup (const struct dir *dir, const char *name,
    Fails if NAME is invalid (i.e. too long) or a disk or memory
    error occurs. */
 bool
-dir_add (struct dir *dir, const char *name, block_sector_t inode_sector, bool is_dir)
+dir_add (struct dir *dir, const char *name, block_sector_t inode_sector,
+    bool is_dir)
 {
   struct dir_entry e;
   off_t ofs;
@@ -222,6 +223,25 @@ dir_remove (struct dir *dir, const char *name)
   inode = inode_open (e.inode_sector);
   if (inode == NULL)
     goto done;
+  
+  if (inode_is_dir (inode))
+  {
+    struct dir *child_dir = dir_open (inode);
+
+    /* Cannot remove root dir. */
+    if (inode_get_sector (dir_get_inode (child_dir)) == ROOT_DIR_SECTOR)
+      return false;
+
+    /* Cannot remove non-empty directories. */
+    if (dir_size (child_dir) > 0)
+    {
+      dir_close (child_dir);
+      goto done;
+    }
+
+    dir_close (child_dir);
+    process_dir_remove (inode);
+  }
 
   /* Erase directory entry. */
   e.in_use = false;
@@ -257,6 +277,36 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
   return false;
 }
 
+/* Readdir that does not return "." and "..". */
+bool
+dir_readdir_strict (struct dir *dir, char name[NAME_MAX + 1])
+{
+  bool result;
+  do
+    result = dir_readdir (dir, name);
+  while (result &&
+      (!strcmp (CURRENT_DIR, name) || !strcmp (PARENT_DIR, name)));
+  return result;
+}
+
+/* Number of nodes in a directory, not counting "." and "..". */
+unsigned
+dir_size (struct dir *dir)
+{
+  char name[NAME_MAX + 1];
+  off_t old_pos = dir->pos;
+  unsigned size = 0;
+
+  bool result = dir_readdir_strict (dir, name);
+  while (result)
+  {
+    result = dir_readdir_strict (dir, name);
+    ++size;
+  }
+  dir->pos = old_pos;
+  return size;
+}
+
 /* Open the current directory of the thread. If its a thread without a process
  * (kernel thread), return the root directory. For user processes, reopen its
  * current directory and return it. */
@@ -265,8 +315,13 @@ dir_open_current ()
 {
   struct dir *dir;
   struct process *process = thread_current ()->process;
-  if (process && process->dir)
-    dir = dir_reopen (process->dir);
+  if (process)
+  {
+    if (process->dir)
+      dir = dir_reopen (process->dir);
+    else
+      dir = NULL;
+  }
   else
     dir = dir_open_root();
   return dir;

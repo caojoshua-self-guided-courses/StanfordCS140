@@ -10,6 +10,7 @@
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/inode.h"
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
@@ -285,6 +286,24 @@ process_activate (void)
      interrupts. */
   tss_update ();
 }
+
+/* Called when a directory is removed. All processes that had dir with
+ * inode open will have its dir set to NULL. */
+void
+process_dir_remove (struct inode *inode)
+{
+  block_sector_t sector = inode_get_sector (inode);
+  struct list_elem *e;
+  for (e = list_begin (&process_list); e != list_end (&process_list);
+        e = list_next (e))
+  {
+    struct process *p = list_entry (e, struct process, elem); 
+    if (p->dir && sector == inode_get_sector (dir_get_inode (p->dir)))
+      p->dir = NULL;
+  }
+  return NULL;
+}
+
 
 /* We load ELF binaries.  The following definitions are taken
    from the ELF specification, [ELF1], more-or-less verbatim.  */
