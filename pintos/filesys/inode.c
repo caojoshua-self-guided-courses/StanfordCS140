@@ -475,11 +475,46 @@ inode_disk_extend_dblock (struct inode_disk *inode_disk,
   return last_sector_num > DBLOCK_END_BOUND;
 }
 
+/* inode_disk_extend helper to write singly indblock children. */
+/* Currently works with sector_num == INODE_NUM_DBLOCKS. Should probably make it 0 or smth. */
+static bool
+inode_disk_extend_indblock_children (block_sector_t indblock,
+    block_sector_t **sectors,
+    unsigned sector_ofs,
+    unsigned *total_sectors_to_write)
+{
+  ASSERT (sector_ofs < INDBLOCK_NUM_CHILDREN);
+
+  unsigned sectors_to_write = total_sectors_to_write - sector_ofs;
+  if (sectors_to_write > INDBLOCK_NUM_CHILDREN)
+    sectors_to_write = INDBLOCK_NUM_CHILDREN;
+
+  unsigned sectors_to_write = last_sector_num - sector_num;
+  sectors_to_write = sectors_to_write < INDBLOCK_NUM_CHILDREN ?
+    sectors_to_write : INDBLOCK_NUM_CHILDREN;
+
+  cache_write_partial (indblock,
+      *sectors,
+      (sector_num - INODE_NUM_DBLOCKS) * sizeof (block_sector_t),
+      sectors_to_write * sizeof (block_sector_t));
+
+  printf ("sector num %d last sector num %d\n", sector_num ,last_sector_num);
+  printf ("sectors to write is %d\n", sectors_to_write);
+  for (unsigned i = 0; i < sectors_to_write; ++i)
+  {
+    printf ("sector: %d\n", **sectors);
+    cache_write (**sectors, zeros);
+    ++(*sectors);
+  }
+  
+  return sector_num + sectors_to_write >= INDBLOCK_NUM_CHILDREN;
+}
+
 /* Helper function to extend an inode. It writes sectors pointers into
  * inode_disk, writes indblock pointers to disk, and fills dblocks with zeros.
  * Returns if the size of the inode is the same or sucessfully increased. 
  * This should be called from inode_write_at to allow file extension, and
- * from inode_create, with inode_disk of length 0. */
+ * from inode_create, with inode_disk->length = 0. */
 static bool
 inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
 {
@@ -489,7 +524,7 @@ inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
   /* Compute current and new number of sectors. */
   unsigned new_last_sector_num = bytes_to_sectors (new_length);
   unsigned cur_last_sector_num = bytes_to_sectors (inode_disk->length);
-  size_t num_new_sectors = new_last_sector_num - cur_last_sector_num;
+  size_t sectors_to_write = new_last_sector_num - cur_last_sector_num;
   unsigned sector_num = cur_last_sector_num;
 
   /* Set the inode_disk new length. */
@@ -497,12 +532,12 @@ inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
   inode_disk->length = new_length;
 
   /* Return if file extension does not require allocating more sectors. */
-  if (num_new_sectors == 0)
+  if (sectors_to_write == 0)
     return true;
 
   /* Allocate new sectors. Return if there is an allocation failure. */
-  block_sector_t *sectors = malloc (sizeof (block_sector_t) * num_new_sectors);
-  if (!sectors || !free_map_allocate (num_new_sectors, sectors))
+  block_sector_t *sectors = malloc (sizeof (block_sector_t) * sectors_to_write);
+  if (!sectors || !free_map_allocate (sectors_to_write, sectors))
     return false;
   block_sector_t *sectors_orig = sectors;
 
@@ -519,46 +554,68 @@ inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
     sector_num = DBLOCK_END_BOUND;
 
   /* TODO: increment sectors instead of indexing it. */
-  sectors = sectors_orig;
+  /* sectors = sectors_orig; */
+
+  /* sector_num -= DBLOCK_END_BOUND; */
+
+  /* Write indblock if needed. */
+  if (sector_num == DBLOCK_END_BOUND)
+  {
+    inode_disk->indblock = *sectors;
+    printf ("indblock set to %d\n", inode_disk->indblock);
+    ++sectors;
+    ++sector_num;
+  }
+
+  /* Write indblock children. */
+  if (!inode_disk_extend_indblock_children (inode_disk->indblock, &sectors,
+    sector_num, new_last_sector_num))
+  {
+    printf ("bust\n");
+    free (sectors_orig);
+    return true;
+  }
+  printf ("not bust\n");
+
 
   /***** Write indirect block and its children. *****/
-  if (cur_last_sector_num <= INDBLOCK_END_BOUND)
-  {
-    /* Write to inode_disk indblock if needed. */
-    if (sector_num == DBLOCK_END_BOUND)
-    {
-      inode_disk->indblock = sectors[sector_num - cur_last_sector_num];
-      ++sector_num;
-    }
+  /* if (cur_last_sector_num <= INDBLOCK_END_BOUND) */
+  /* { */
+  /*   /1* Write to inode_disk indblock if needed. *1/ */
+  /*   if (sector_num == DBLOCK_END_BOUND) */
+  /*   { */
+  /*     inode_disk->indblock = sectors[sector_num - cur_last_sector_num]; */
+  /*     ++sector_num; */
+  /*   } */
 
-    /* Compute needed number of indblock child blocks. */
-    block_sector_t indblock_last_sector_num = new_last_sector_num < INDBLOCK_END_BOUND ?
-      new_last_sector_num : INDBLOCK_END_BOUND;
-    size_t dblocks_to_write = indblock_last_sector_num - sector_num;
+  /*   /1* Compute needed number of indblock child blocks. *1/ */
+  /*   block_sector_t indblock_last_sector_num = new_last_sector_num < INDBLOCK_END_BOUND ? */
+  /*     new_last_sector_num : INDBLOCK_END_BOUND; */
+  /*   size_t dblocks_to_write = indblock_last_sector_num - sector_num; */
 
-    /* Write child pointers to indblock on disk. */
-    cache_write_partial (inode_disk->indblock, sectors + sector_num -
-        cur_last_sector_num,
-        (sector_num - DBLOCK_END_BOUND - 1) * sizeof (block_sector_t),
-        dblocks_to_write * sizeof (block_sector_t));
+  /*   /1* Write child pointers to indblock on disk. *1/ */
+  /*   cache_write_partial (inode_disk->indblock, sectors + sector_num - */
+  /*       cur_last_sector_num, */
+  /*       (sector_num - DBLOCK_END_BOUND - 1) * sizeof (block_sector_t), */
+  /*       dblocks_to_write * sizeof (block_sector_t)); */
 
-    /* Fill data blocks with zeros. */
-    while (sector_num < indblock_last_sector_num)
-    {
-      cache_write (sectors[sector_num - cur_last_sector_num], zeros);
-      ++sector_num;
-    }
+  /*   /1* Fill data blocks with zeros. *1/ */
+  /*   while (sector_num < indblock_last_sector_num) */
+  /*   { */
+  /*     cache_write (sectors[sector_num - cur_last_sector_num], zeros); */
+  /*     ++sector_num; */
+  /*   } */
 
-    /* Sanity check. */
-    ASSERT (sector_num == INDBLOCK_END_BOUND || sector_num == new_last_sector_num);
+  /*   /1* Sanity check. *1/ */
+  /*   ASSERT (sector_num == INDBLOCK_END_BOUND || sector_num == new_last_sector_num); */
 
-    /* Return if done writing sectors. */
-    if (new_last_sector_num <= INDBLOCK_END_BOUND)
-    {
-      free (sectors_orig);
-      return true;
-    }
-  }
+  /*   /1* Return if done writing sectors. *1/ */
+  /*   if (new_last_sector_num <= INDBLOCK_END_BOUND) */
+  /*   { */
+  /*     free (sectors_orig); */
+  /*     return true; */
+  /*   } */
+  /* } */
 
 
   /***** Write doubly indirect block and its children. *****/
