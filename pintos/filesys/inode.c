@@ -542,18 +542,9 @@ inode_disk_extend_doubly_indblock_children (block_sector_t doubly_indblock,
     ++(*sectors);
     --(*sectors_to_write);
 
-    unsigned data_sectors_to_write = *sectors_to_write < INDBLOCK_NUM_CHILDREN ?
-      *sectors_to_write : INDBLOCK_NUM_CHILDREN;
-
-    /* TODO: make this extensible. */
-    cache_write_partial (direct_children_sectors[direct_children_sectors_idx++],
-        *sectors, 0, data_sectors_to_write * sizeof (block_sector_t));
-
-    for (unsigned i = 0; i < data_sectors_to_write; ++i)
-    {
-      cache_write (**sectors, zeros);
-      ++(*sectors);
-    }
+    inode_disk_extend_indblock_children (
+        direct_children_sectors[direct_children_sectors_idx++], sectors,
+        sector_ofs, sectors_to_write);
 
     --direct_children_left;
   }
@@ -581,6 +572,9 @@ inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
   unsigned new_last_sector_num = bytes_to_sectors (new_length);
   unsigned cur_last_sector_num = bytes_to_sectors (inode_disk->length);
   size_t sectors_to_write = new_last_sector_num - cur_last_sector_num;
+  
+  /* Indicates which dblock or indblock/doubly indblock child to write to.
+   * Helpful for file extension. */
   unsigned sector_ofs = cur_last_sector_num;
 
   /* Set the inode_disk new length. */
