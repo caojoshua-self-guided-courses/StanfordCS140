@@ -464,9 +464,16 @@ inode_disk_extend_dblock (struct inode_disk *inode_disk,
     unsigned *sector_ofs,
     unsigned *total_sectors_to_write)
 {
-  if (*sector_ofs >= INODE_NUM_DBLOCKS)
+  if (*sector_ofs == INODE_NUM_DBLOCKS)
   {
-    sector_ofs -= INODE_NUM_DBLOCKS;
+    /* Exactly at dblock end border. No need to add 1. */
+    *sector_ofs -= INODE_NUM_DBLOCKS;
+    return;
+  }
+  else if (*sector_ofs > INODE_NUM_DBLOCKS)
+  {
+    /* Add 1 for indblock sector. */
+    *sector_ofs -= INODE_NUM_DBLOCKS + 1;
     return;
   }
 
@@ -493,13 +500,20 @@ inode_disk_extend_indblock_children (block_sector_t indblock,
     unsigned *sector_ofs,
     unsigned *total_sectors_to_write)
 {
-  if (*sector_ofs >= INDBLOCK_NUM_CHILDREN)
+  if (*sector_ofs == INDBLOCK_NUM_CHILDREN)
   {
+    /* Exactly at indblock end border. No need to add 1. */
     *sector_ofs -= INDBLOCK_NUM_CHILDREN;
     return;
   }
+  else if (*sector_ofs > INDBLOCK_NUM_CHILDREN)
+  {
+    /* Add 1 for doubly indblock sector. */
+    *sector_ofs -= INDBLOCK_NUM_CHILDREN + 1;
+    return;
+  }
 
-  unsigned sectors_to_write = *total_sectors_to_write - *sector_ofs;
+  unsigned sectors_to_write = *total_sectors_to_write;
   if (sectors_to_write > INDBLOCK_NUM_CHILDREN)
     sectors_to_write = INDBLOCK_NUM_CHILDREN;
 
@@ -531,6 +545,10 @@ inode_disk_extend_doubly_indblock_children (block_sector_t doubly_indblock,
       (*sectors_to_write, INDBLOCK_NUM_CHILDREN + 1);
   unsigned direct_children_left = num_direct_children;
 
+  /* Compute offsets. */
+  unsigned first_indblock = *sector_ofs / (INDBLOCK_NUM_CHILDREN + 1);
+  *sector_ofs = *sector_ofs % (INDBLOCK_NUM_CHILDREN + 1);
+
   /* Separate array to hold direct children sectors. */
   block_sector_t *direct_children_sectors = malloc (num_direct_children *
       sizeof (block_sector_t));
@@ -553,7 +571,7 @@ inode_disk_extend_doubly_indblock_children (block_sector_t doubly_indblock,
   /* TODO: make this extensible. */
   cache_write_partial (doubly_indblock,
       direct_children_sectors,
-      0,
+      first_indblock,
       num_direct_children * sizeof (block_sector_t));
 }
 
@@ -579,6 +597,7 @@ inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
 
   /* Set the inode_disk new length. */
   /* printf ("extend inode from %d to %d sectors\n", cur_last_sector_num, new_last_sector_num); */
+  /* printf ("extend inode from %d to %d bytes\n", inode_disk->length, new_length); */
   inode_disk->length = new_length;
 
   /* Return if file extension does not require allocating more sectors. */
