@@ -523,8 +523,7 @@ inode_disk_extend_doubly_indblock_children (block_sector_t doubly_indblock,
     unsigned *sector_ofs,
     unsigned *sectors_to_write)
 {
-  /* Number of doubly indblock direct children. Add 1 for the indblock
-   * sector. */
+  /* Number of doubly indblock direct children. */
   unsigned num_direct_children = DIV_ROUND_UP 
       (*sectors_to_write, INDBLOCK_NUM_CHILDREN);
   unsigned direct_children_left = num_direct_children;
@@ -533,17 +532,17 @@ inode_disk_extend_doubly_indblock_children (block_sector_t doubly_indblock,
    * All subsequent children will need a new indblock. */
   bool new_child = *sector_ofs % INDBLOCK_NUM_CHILDREN == 0;
 
-  /* Compute offsets. */
-  unsigned first_indblock = *sector_ofs / INDBLOCK_NUM_CHILDREN;
-  *sector_ofs = *sector_ofs % INDBLOCK_NUM_CHILDREN;
-
   /* Read in the doubly indblock to find which indblock to write to. */
   block_sector_t *direct_children_sectors = malloc (BLOCK_SECTOR_SIZE);
   cache_read (doubly_indblock, direct_children_sectors);
-  unsigned direct_children_sectors_idx = first_indblock;
+  unsigned direct_children_sectors_idx = *sector_ofs / INDBLOCK_NUM_CHILDREN;
+
+  /* We are now only interested in sector_ofs within an INDBLOCK. */
+  *sector_ofs = *sector_ofs % INDBLOCK_NUM_CHILDREN;
 
   while (direct_children_left > 0)
   {
+    /* Write the doubly indblock direct child if needed. */
     if (new_child)
     {
       direct_children_sectors[direct_children_sectors_idx] = **indirect_sectors;
@@ -552,6 +551,7 @@ inode_disk_extend_doubly_indblock_children (block_sector_t doubly_indblock,
     else
       new_child = true;
 
+    /* Write the doubly indblock grandchildren. */
     inode_disk_extend_indblock_children (
         direct_children_sectors[direct_children_sectors_idx++], sectors,
         sector_ofs, sectors_to_write);
@@ -576,26 +576,18 @@ inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
   if (!inode_disk || new_length < inode_disk->length)
     return false;
 
-  /* Compute current and new number of sectors. */
-  unsigned new_last_sector_num = bytes_to_sectors (new_length);
-  unsigned cur_last_sector_num = bytes_to_sectors (inode_disk->length);
-  size_t sectors_to_write = new_last_sector_num - cur_last_sector_num;
-
-  /* TODO: use these. will make doubly indblock life easier. */
+  /* Compute sectors to write. */
   size_t data_sectors_to_write = bytes_to_data_sectors (new_length) -
     bytes_to_data_sectors (inode_disk->length);
   size_t indirect_sectors_to_write = bytes_to_indirect_sectors (new_length) -
     bytes_to_indirect_sectors (inode_disk->length);
-  ASSERT (sectors_to_write == data_sectors_to_write + indirect_sectors_to_write);
+  size_t sectors_to_write = data_sectors_to_write + indirect_sectors_to_write;
   
   /* Indicates which dblock or indblock/doubly indblock child to write to.
    * Helpful for file extension. */
   unsigned sector_ofs = bytes_to_data_sectors (inode_disk->length);
 
   /* Set the inode_disk new length. */
-  /* printf ("extend inode from %d to %d bytes\n", inode_disk->length, new_length); */
-  /* printf ("%d new data sectors and %d new indirect sectors\n", data_sectors_to_write, */
-      /* indirect_sectors_to_write); */
   inode_disk->length = new_length;
 
   /* Return if file extension does not require allocating more sectors. */
