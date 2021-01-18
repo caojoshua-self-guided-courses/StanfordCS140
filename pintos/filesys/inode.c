@@ -464,16 +464,9 @@ inode_disk_extend_dblock (struct inode_disk *inode_disk,
     unsigned *sector_ofs,
     unsigned *total_sectors_to_write)
 {
-  if (*sector_ofs == INODE_NUM_DBLOCKS)
+  if (*sector_ofs >= INODE_NUM_DBLOCKS)
   {
-    /* Exactly at dblock end border. No need to add 1. */
     *sector_ofs -= INODE_NUM_DBLOCKS;
-    return;
-  }
-  else if (*sector_ofs > INODE_NUM_DBLOCKS)
-  {
-    /* Add 1 for indblock sector. */
-    *sector_ofs -= INODE_NUM_DBLOCKS + 1;
     return;
   }
 
@@ -500,16 +493,9 @@ inode_disk_extend_indblock_children (block_sector_t indblock,
     unsigned *sector_ofs,
     unsigned *total_sectors_to_write)
 {
-  if (*sector_ofs == INDBLOCK_NUM_CHILDREN)
+  if (*sector_ofs >= INDBLOCK_NUM_CHILDREN)
   {
-    /* Exactly at indblock end border. No need to add 1. */
     *sector_ofs -= INDBLOCK_NUM_CHILDREN;
-    return;
-  }
-  else if (*sector_ofs > INDBLOCK_NUM_CHILDREN)
-  {
-    /* Add 1 for doubly indblock sector. */
-    *sector_ofs -= INDBLOCK_NUM_CHILDREN + 1;
     return;
   }
 
@@ -536,18 +522,25 @@ inode_disk_extend_indblock_children (block_sector_t indblock,
 static void
 inode_disk_extend_doubly_indblock_children (block_sector_t doubly_indblock,
     block_sector_t **sectors,
+    block_sector_t **indirect_sectors,
     unsigned *sector_ofs,
     unsigned *sectors_to_write)
 {
+  /* printf ("sector ofs is %d\n", *sector_ofs); */
+  /* printf ("doubly indblock total sectors to write %d\n", *sectors_to_write); */
   /* Number of doubly indblock direct children. Add 1 for the indblock
    * sector. */
   unsigned num_direct_children= DIV_ROUND_UP 
       (*sectors_to_write, INDBLOCK_NUM_CHILDREN + 1);
   unsigned direct_children_left = num_direct_children;
+  /* printf ("num_direct_children %d\n", num_direct_children); */
 
   /* Compute offsets. */
   unsigned first_indblock = *sector_ofs / (INDBLOCK_NUM_CHILDREN + 1);
   *sector_ofs = *sector_ofs % (INDBLOCK_NUM_CHILDREN + 1);
+
+  if (*sector_ofs > 0)
+    --(*sector_ofs);
 
   /* Separate array to hold direct children sectors. */
   block_sector_t *direct_children_sectors = malloc (num_direct_children *
@@ -556,9 +549,8 @@ inode_disk_extend_doubly_indblock_children (block_sector_t doubly_indblock,
 
   while (direct_children_left > 0)
   {
-    direct_children_sectors[direct_children_sectors_idx] = **sectors;
-    ++(*sectors);
-    --(*sectors_to_write);
+    direct_children_sectors[direct_children_sectors_idx] = **indirect_sectors;
+    ++(*indirect_sectors);
 
     inode_disk_extend_indblock_children (
         direct_children_sectors[direct_children_sectors_idx++], sectors,
@@ -590,13 +582,19 @@ inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
   unsigned new_last_sector_num = bytes_to_sectors (new_length);
   unsigned cur_last_sector_num = bytes_to_sectors (inode_disk->length);
   size_t sectors_to_write = new_last_sector_num - cur_last_sector_num;
+
+  /* TODO: use these. will make doubly indblock life easier. */
+  size_t data_sectors_to_write = bytes_to_data_sectors (new_length) -
+    bytes_to_data_sectors (inode_disk->length);
+  size_t indirect_sectors_to_write = bytes_to_indirect_sectors (new_length) -
+    bytes_to_indirect_sectors (inode_disk->length);
+  ASSERT (sectors_to_write == data_sectors_to_write + indirect_sectors_to_write);
   
   /* Indicates which dblock or indblock/doubly indblock child to write to.
    * Helpful for file extension. */
-  unsigned sector_ofs = cur_last_sector_num;
+  unsigned sector_ofs = bytes_to_data_sectors (inode_disk->length);
 
   /* Set the inode_disk new length. */
-  /* printf ("extend inode from %d to %d sectors\n", cur_last_sector_num, new_last_sector_num); */
   /* printf ("extend inode from %d to %d bytes\n", inode_disk->length, new_length); */
   inode_disk->length = new_length;
 
@@ -609,11 +607,12 @@ inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
   if (!sectors || !free_map_allocate (sectors_to_write, sectors))
     return false;
   block_sector_t *sectors_orig = sectors;
+  block_sector_t *indirect_sectors = sectors + data_sectors_to_write;
 
   /* Write dblocks. */
   inode_disk_extend_dblock (inode_disk, &sectors, &sector_ofs,
-      &sectors_to_write);
-  if (sectors_to_write <= 0)
+      &data_sectors_to_write);
+  if (data_sectors_to_write <= 0)
   {
     free (sectors_orig);
     return true;
@@ -622,15 +621,14 @@ inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
   /* Write indblock if needed. */
   if (sector_ofs == 0)
   {
-    inode_disk->indblock = *sectors;
-    ++sectors;
-    --sectors_to_write;
+    inode_disk->indblock = *indirect_sectors;
+    ++indirect_sectors;
   }
 
   /* Write indblock children. */
   inode_disk_extend_indblock_children (inode_disk->indblock, &sectors,
-      &sector_ofs, &sectors_to_write);
-  if (sectors_to_write <= 0)
+      &sector_ofs, &data_sectors_to_write);
+  if (data_sectors_to_write <= 0)
   {
     free (sectors_orig);
     return true;
@@ -639,18 +637,14 @@ inode_disk_extend (struct inode_disk *inode_disk, off_t new_length)
   /* Write doubly indblock if needed. */
   if (sector_ofs == 0)
   {
-    inode_disk->doubly_indblock = *sectors;
-    ++sectors;
-    --sectors_to_write;
+    inode_disk->doubly_indblock = *indirect_sectors;
+    ++indirect_sectors;
   }
 
   /* Write doubly indblock_children. */
   inode_disk_extend_doubly_indblock_children (inode_disk->doubly_indblock,
-      &sectors, &sector_ofs, &sectors_to_write);
+      &sectors, &indirect_sectors, &sector_ofs, &data_sectors_to_write);
   
-  /* Sanity Check. */
-  /* ASSERT (sectors_to_write <= 0); */
-
   free (sectors_orig);
   return true;
 }
