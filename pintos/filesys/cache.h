@@ -13,6 +13,7 @@ void cache_read_async (block_sector_t sector);
 void cache_write (block_sector_t, void *buffer);
 void cache_write_partial (block_sector_t sector, const void *buffer, int sector_ofs,
     int size);
+void write_cache_to_disk (void);
 void cache_print_stats (void);
 
 #endif /* filesys/cache.h */

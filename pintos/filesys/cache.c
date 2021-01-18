@@ -20,7 +20,7 @@ static bool cache_entry_exists (block_sector_t sector);
 static struct cache_entry * get_cache_entry (block_sector_t sector);
 static void read_cache_entry_from_disk (struct cache_entry *cache_entry);
 static void write_cache_entry_to_disk (struct cache_entry *cache_entry);
-static void write_cache_to_disk (void *aux);
+static void write_cache_to_disk_thread (void *aux);
 static void cache_read_thread (void *sector);
 static struct cache_entry * get_cache_entry_to_evict (void);
 
@@ -52,7 +52,7 @@ cache_init (void)
   for (int i = 0; i < CACHE_NUM_SECTORS; ++i)
     cache[i].free = true;
   lock_init (&cache_lock);
-  thread_create ("cache to disk writer", PRI_DEFAULT, write_cache_to_disk, NULL);
+  thread_create ("cache to disk writer", PRI_DEFAULT, write_cache_to_disk_thread, NULL);
 }
 
 /* Read entire sector into buffer. */
@@ -207,23 +207,32 @@ write_cache_entry_to_disk (struct cache_entry *cache_entry)
   }
 }
 
+/* Writes the entire cache to disk. Should only be called periodically from
+ * write_cache_to_disk_thread and on system shutdown. */
+void
+write_cache_to_disk (void)
+{
+  lock_acquire (&cache_lock);
+  struct cache_entry *cache_entry;
+  for (int i = 0; i < CACHE_NUM_SECTORS; ++i)
+  {
+    cache_entry = cache + i;
+    if (!cache_entry->free)
+      write_cache_entry_to_disk (cache_entry);
+  }
+  lock_release (&cache_lock);
+}
+
+
 /* Write the entire cache to disk periodically. This function should be run as
  * its own thread through thread_create.
  * (write behind). */
 static void
-write_cache_to_disk (void *aux UNUSED)
+write_cache_to_disk_thread (void *aux UNUSED)
 {
   while (true)
   {
-    lock_acquire (&cache_lock);
-    struct cache_entry *cache_entry;
-    for (int i = 0; i < CACHE_NUM_SECTORS; ++i)
-    {
-      cache_entry = cache + i;
-      if (!cache_entry->free)
-        write_cache_entry_to_disk (cache_entry);
-    }
-    lock_release (&cache_lock);
+    write_cache_to_disk ();
     timer_sleep (DISK_WRITE_FREQUENCY);
   }
 }

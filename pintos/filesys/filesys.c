@@ -2,6 +2,7 @@
 #include <debug.h>
 #include <stdio.h>
 #include <string.h>
+#include "filesys/cache.h"
 #include "filesys/file.h"
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
@@ -42,6 +43,7 @@ filesys_init (bool format)
 void
 filesys_done (void) 
 {
+  write_cache_to_disk ();
   free_map_close ();
 }
 
