@@ -5,6 +5,8 @@
 #include "userprog/syscall.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "vm/page.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -128,6 +130,8 @@ page_fault (struct intr_frame *f)
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
 
+  thread_current ()->esp = f->esp;
+
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
      data.  It is not necessarily the address of the instruction
@@ -149,6 +153,30 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+  /* If the fault is a rights violation on user memory, whether from user or
+   * kernel mode, it probably means a user program is attempting to write 
+   * into a page without write permissions. Exit the thread. */
+  if (!not_present)
+    exit (-1);
+
+  /* If page is not present, attempt to load the page from outside of main
+   * memory. */
+	bool success = false;
+	if (not_present)
+  {
+    /* Allocate a new page if the fault occured during a user stack access. */
+    if (user && is_unallocated_stack_access (fault_addr))
+      success = stack_page_alloc_multiple (fault_addr);
+
+    /* Attempt to load the page from filesys or swap if its a user address.
+     * The fault may still occur from the kernel if its in a syscall. */
+    else if (is_user_vaddr (fault_addr))
+      success = load_page_into_frame (fault_addr);
+  }
+
+	if (success)
+		return;
+
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
@@ -157,6 +185,7 @@ page_fault (struct intr_frame *f)
           not_present ? "not present" : "rights violation",
           write ? "writing" : "reading",
           user ? "user" : "kernel");
+
   kill (f);
 }
 

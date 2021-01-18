@@ -6,6 +6,9 @@
 #include <stdbool.h>
 
 #include "threads/loader.h"
+#include "threads/thread.h"
+
+#include "userprog/pagedir.h"
 
 /* Functions and macros for working with virtual addresses.
 
@@ -19,6 +22,10 @@
 #define PGBITS  12                         /* Number of offset bits. */
 #define PGSIZE  (1 << PGBITS)              /* Bytes in a page. */
 #define PGMASK  BITMASK(PGSHIFT, PGBITS)   /* Page offset bits (0:12). */
+
+#define PUSHA_BYTES 32 /* Number of bytes PUSHA pushes. */
+#define MAX_STACK_SIZE 8192000 /* 8 MB. */
+#define MIN_STACK_ADDRESS PHYS_BASE - MAX_STACK_SIZE
 
 /* Offset within a page. */
 static inline unsigned pg_ofs (const void *va) {

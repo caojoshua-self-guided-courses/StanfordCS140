@@ -607,6 +607,8 @@ init_thread (struct thread *t, const char *name, int priority)
   list_push_back (&all_list, &t->allelem);
   t->nice = thread_get_nice ();
   t->recent_cpu = 0;
+  t->stack_pages = 0;
+  t->process = NULL;
 
   if (thread_mlfqs)
     thread_update_mlfqs_priority(t);
@@ -750,7 +752,8 @@ struct thread *list_highest_priority_thread(struct list *l) {
 }
 
 /* Get thread with given tid */
-struct thread *get_thread(tid_t tid)
+struct thread *
+get_thread(tid_t tid)
 {
   struct list_elem *e;
   for (e = list_begin (&all_list); e != list_end (&all_list);
@@ -763,4 +766,11 @@ struct thread *get_thread(tid_t tid)
     }
   }
   return 0;
+}
+
+/* Get the address of the bottom of the stack of the current thread. */
+void*
+get_stack_bottom (void)
+{
+  return PHYS_BASE - thread_current ()->stack_pages * PGSIZE;
 }

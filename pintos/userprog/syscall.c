@@ -3,6 +3,7 @@
 #include <syscall-nr.h>
 #include "devices/input.h"
 #include "devices/shutdown.h"
+#include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "lib/string.h"
@@ -10,110 +11,38 @@
 #include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-#include "userprog/pagedir.h"
 #include "userprog/process.h"
+#include "userprog/syscall-file.h"
+#include "vm/page.h"
 
 static void syscall_handler (struct intr_frame *);
+static void acquire_filesys_syscall_lock (void);
+static void release_filesys_syscall_lock (void);
 
-/* Min fd. fd 0 and fd 1 are reserved for stdin and stdout 
- * respectively. */
-static const int MIN_FD = 2;
+/* Lock to make sure only one thread can execute a filesys ssycall at a
+ * time. */
+struct lock filesys_syscall_lock;
 
-/* Elements of process->fd_map that map fd to files */
-struct file_descriptor
+/* Acquire the filesys syscall lock. */
+static void
+acquire_filesys_syscall_lock ()
 {
-  int fd;
-  struct file *file;
-  struct list_elem elem;
-};
+  lock_acquire (&filesys_syscall_lock);
+}
 
-/* register syscall_handler for interrupts */
+/* Release the filesys syscall lock. */
+static void
+release_filesys_syscall_lock ()
+{
+  lock_release (&filesys_syscall_lock);
+}
+
+/* Register syscall_handler for interrupts */
 void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
-}
-
-/* Create and return a new file descriptor. */
-static int
-create_fd (const char *file_name)
-{
-  if (!file_name)
-    return -1;
-  struct file *file = filesys_open (file_name);
-  if (!file)
-    return -1;
-
-  struct process *process = thread_current ()->process;
-  if (process)
-  {
-    int fd = MIN_FD;
-    struct list *fd_map = &process->fd_map;
-
-    struct file_descriptor *file_descriptor = malloc (sizeof (struct file_descriptor));
-    file_descriptor->file = file;
-
-    /* Iterate through the fd list until there is an open fd */
-    struct list_elem *e; 
-    for (e = list_begin (fd_map); e != list_end (fd_map); e = list_next (e))
-    {
-      struct file_descriptor *fd_temp = list_entry (e, struct file_descriptor, elem); 
-      if (fd != fd_temp->fd)
-      {
-        file_descriptor->fd = fd;
-        e = list_next(e);
-        break;
-      }
-      ++fd;
-    }
-    file_descriptor->fd = fd;
-    list_insert (e, &file_descriptor->elem);
-    return fd;
-  }
-  return -1;
-}
-
-/* Returns the file associated with the given fd */
-static struct file_descriptor*
-get_file_descriptor (int fd)
-{
-  struct process *process = thread_current ()->process;
-  if (process)
-  {
-    struct list *fd_map = &process->fd_map;
-    struct list_elem *e;
-    for (e = list_begin (fd_map); e != list_end (fd_map); e = list_next (e))
-    {
-      struct file_descriptor *file_descriptor = list_entry (e, struct file_descriptor, elem); 
-      if (file_descriptor->fd == fd)
-        return file_descriptor;
-    }
-  }
-  return NULL;
-}
-
-/* Cleans FDs with given pid */
-static void
-clean_fds (pid_t pid)
-{
-  struct process *process = thread_current ()->process;
-  if (process)
-  {
-    struct list *fd_map = &process->fd_map;
-    struct list_elem *e;
-    for (e = list_begin (fd_map); e != list_end (fd_map); e = list_next (e))
-    {
-      struct file_descriptor *file_descriptor = list_entry (e, struct file_descriptor, elem); 
-      if (process->pid == pid)
-      {
-        struct list_elem *temp = list_prev (e);
-        list_remove (e);
-        e = temp;
-        file_close (file_descriptor->file);
-        free (file_descriptor);
-      }
-    }
-  }
+  lock_init (&filesys_syscall_lock);
 }
 
 /* Validate uaddr as a user address. If uaddr is not valid
@@ -121,8 +50,9 @@ clean_fds (pid_t pid)
 static void
 validate_uaddr (const void *uaddr)
 {
-  if (!uaddr || !is_user_vaddr(uaddr) ||
-    !pagedir_get_page(thread_current()->pagedir, uaddr))
+  if (!uaddr || 
+    !is_user_vaddr (uaddr) ||
+		!page_exists (uaddr))
     exit (-1);
 }
 
@@ -142,6 +72,16 @@ validate_string (const void *string)
   validate_uaddr (string + strlen (string));
 }
 
+/* Creates a file or directory. Called by sys open and create. */
+static bool
+create_generic (const char *name, int initial_size, bool is_dir)
+{
+  validate_string (name);
+  acquire_filesys_syscall_lock ();
+  bool result = filesys_create (name, initial_size, is_dir);
+  release_filesys_syscall_lock ();
+  return result;
+}
 
 /********** SYSTEM CALLS **********/
 
@@ -166,7 +106,10 @@ exit (int status)
   if (process)
   {
     process->status = status;
-    clean_fds (process->pid);
+    if (process->dir)
+      dir_close (process->dir);
+    clean_mapids ();
+    clean_fds ();
   }
 
   /* Error message for passing test cases */
@@ -181,6 +124,7 @@ exec (const char *cmd_line)
 {
   validate_string (cmd_line);
 
+  acquire_filesys_syscall_lock ();
   tid_t tid = process_execute (cmd_line);
   struct thread *t = get_thread (tid);
   if (t)
@@ -189,8 +133,12 @@ exec (const char *cmd_line)
     sema_down (t->loaded_sema);
     /* Only return the tid if the executable is loaded successfully */
     if (p && p->loaded_success)
+    {
+      release_filesys_syscall_lock ();
       return tid;
+    }
   }
+  release_filesys_syscall_lock ();
   return PID_ERROR; 
 }
 
@@ -203,31 +151,39 @@ wait (pid_t pid)
 static bool
 create (const char *file, unsigned initial_size)
 {
-  validate_string (file);
-  return filesys_create (file, initial_size); 
+  return create_generic (file, initial_size, false);
 }
 
 static bool
 remove (const char *file)
 {
   validate_string (file);
-  return filesys_remove (file);
+  acquire_filesys_syscall_lock ();
+  bool result = filesys_remove (file);
+  release_filesys_syscall_lock ();
+  return result;
 }
 
 static int
 open (const char *file)
 {
   validate_string (file);
-  return create_fd (file);
+  acquire_filesys_syscall_lock ();
+  int fd = create_fd (file);
+  release_filesys_syscall_lock ();
+  return fd;
 }
 
 static int
 filesize (int fd)
 {
+  int filesize = -1;
+  acquire_filesys_syscall_lock ();
   struct file_descriptor *file_descriptor = get_file_descriptor (fd);
-  if (file_descriptor)
-    return file_length (file_descriptor->file);
-  return -1;
+  if (file_descriptor && !file_descriptor->is_dir)
+      filesize = file_length (file_descriptor->file.file);
+  release_filesys_syscall_lock ();
+  return filesize;
 }
 
 static int
@@ -236,16 +192,23 @@ read (int fd, void *buffer, unsigned size)
   validate_uaddr (buffer);
   validate_uaddr (buffer + size);
   
+  int read_bytes = -1;
+  acquire_filesys_syscall_lock ();
+
   /* fd 0 is keyboard */
   if (fd == 0)
   {
     *(uint8_t *) buffer = input_getc();
-    return 1;
+    read_bytes = 1;
   }
-  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
-  if (file_descriptor)
-    return file_read (file_descriptor->file, buffer, size); 
-  return -1;
+  else
+  {
+    struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+    if (file_descriptor && !file_descriptor->is_dir)
+      read_bytes = file_read (file_descriptor->file.file, buffer, size);
+  }
+  release_filesys_syscall_lock ();
+  return read_bytes;
 }
 
 static int
@@ -254,52 +217,191 @@ write (int fd, const void *buffer, unsigned size)
   validate_uaddr (buffer);
   validate_uaddr (buffer + size);
 
+  int write_bytes = 0;
+  acquire_filesys_syscall_lock ();
+
   if (fd == 1) {
     putbuf (buffer, size);
-    return size;
+    write_bytes = size;
   }
-  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
-  if (file_descriptor)
-    return file_write (file_descriptor->file, buffer, size);  
-  return 0;
+  else
+  {
+    struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+    if (file_descriptor)
+    {
+      if (file_descriptor->is_dir)
+        write_bytes = -1;
+      else
+        write_bytes = file_write (file_descriptor->file.file, buffer, size);
+    }
+  }
+  release_filesys_syscall_lock ();
+  return write_bytes;
 }
 
 static void
 seek (int fd, unsigned position)
 {
+  acquire_filesys_syscall_lock ();
   struct file_descriptor *file_descriptor = get_file_descriptor(fd);
-  if (file_descriptor)
-    file_seek (file_descriptor->file, position);
+  if (file_descriptor && !file_descriptor->is_dir)
+    file_seek (file_descriptor->file.file, position);
+  release_filesys_syscall_lock ();
 }
 
 static unsigned
 tell (int fd)
 {
+  unsigned pos = -1;
+  acquire_filesys_syscall_lock ();
   struct file_descriptor *file_descriptor = get_file_descriptor(fd);
-  if (file_descriptor)
-    return file_tell (file_descriptor->file);
-  return -1;
+  if (file_descriptor && !file_descriptor->is_dir)
+    pos = file_tell (file_descriptor->file.file);
+  release_filesys_syscall_lock ();
+  return pos;
 }
 
 static void
 close (int fd)
 {
+  acquire_filesys_syscall_lock ();
   struct file_descriptor *file_descriptor = get_file_descriptor(fd);
   if (file_descriptor)
   {
     list_remove (&file_descriptor->elem);
-    file_close (file_descriptor->file);
+    fd_close_file (file_descriptor);
   }
+  release_filesys_syscall_lock ();
+}
+
+static int
+mmap (int fd, void *addr)
+{
+  if (!addr || pg_ofs (addr) != 0)
+    return -1;
+
+  acquire_filesys_syscall_lock ();
+  int mapid = -1;
+
+  struct mapid_entry *mapid_entry = create_mapid (fd, addr);
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  if (mapid_entry && file_descriptor && !file_descriptor->is_dir)
+  {
+    struct file* file = file_descriptor->file.file;
+    int len = file_length (file);
+
+    /* Check that all pages are availible. It is more efficient to check in two
+     * loops. Checking and mapping in the same loop would require freeing
+     * previously allocated pages if there is a failed check. */
+    void *paddr = addr;
+    int ofs = 0;
+    while (ofs < len)
+    {
+      if (page_exists (paddr + ofs))
+      {
+        release_filesys_syscall_lock ();
+        return -1;
+      }
+      paddr += PGSIZE;
+      ofs += PGSIZE;
+    }
+
+    /* Lazy load a page in each loop iteration. */
+    paddr = addr;
+    ofs = 0;
+    while (ofs < len)
+    {
+      /* Only read the remaining bytes for the last page. */
+      int bytes_left = len - ofs;
+      int page_read_bytes = bytes_left > PGSIZE ? PGSIZE : bytes_left;
+
+      lazy_load_segment (paddr, file, ofs, page_read_bytes,
+          PGSIZE - page_read_bytes, true);
+      paddr += PGSIZE;
+      ofs += PGSIZE;
+    }
+    mapid = mapid_entry->mapid;
+  }
+  release_filesys_syscall_lock ();
+  return mapid;
+}
+
+static void
+munmap (int mapid)
+{
+  acquire_filesys_syscall_lock ();
+  remove_mapid (mapid);
+  release_filesys_syscall_lock ();
+}
+
+static bool
+chdir (const char *dir_name)
+{
+  struct dir *dir = filesys_open_dir (dir_name);
+  if (dir)
+  {
+    struct process *p = thread_current ()->process;
+    if (p)
+    {
+      if (p->dir)
+      dir_close (p->dir);
+      p->dir = dir;
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool
+mkdir (const char *dir)
+{
+  return create_generic (dir, 0, true);
+}
+
+static bool
+readdir (int fd, char *name)
+{
+  bool result = false;
+  acquire_filesys_syscall_lock ();
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  if (file_descriptor && file_descriptor->is_dir)
+    result = dir_readdir_strict (file_descriptor->file.dir, name);
+  release_filesys_syscall_lock ();
+  return result;
+}
+
+static bool
+isdir (int fd)
+{
+  bool result = false;
+  acquire_filesys_syscall_lock ();
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  if (file_descriptor)
+    result = file_descriptor->is_dir;
+  release_filesys_syscall_lock ();
+  return result;
+}
+
+static int
+inumber (int fd)
+{
+  int result = -1;
+  acquire_filesys_syscall_lock ();
+  struct file_descriptor *file_descriptor = get_file_descriptor (fd);
+  result = fd_get_inumber (file_descriptor);
+  release_filesys_syscall_lock ();
+  return result;
 }
 
 static void
 syscall_handler (struct intr_frame *f) 
 {
   void *esp = f->esp;
+  thread_current ()->esp = esp;
   validate_uaddr (esp);
   
-  uint32_t sys_call_num = *(int *) esp;
-  switch (sys_call_num)
+  uint32_t syscall_num = *(int *) esp;
+  switch (syscall_num)
   {
     case SYS_HALT:
       halt();
@@ -339,7 +441,7 @@ syscall_handler (struct intr_frame *f)
       break;
     case SYS_WRITE:
       validate_args (esp, 3);
-      f->eax = write (*(int *)(esp + 4), (void *) *(int *)(esp + 8), 
+      f->eax = write (*(int *)(esp + 4), (const void *) *(int *)(esp + 8), 
           *(unsigned *)(esp + 12));
       break;
     case SYS_SEEK:
@@ -353,6 +455,34 @@ syscall_handler (struct intr_frame *f)
     case SYS_CLOSE:
       validate_args (esp, 1);
       close(*(int *)(esp + 4));
+      break;
+    case SYS_MMAP:
+      validate_args (esp, 2);
+      f->eax = mmap (*(int *)(esp + 4), *(void **)(esp + 8));
+      break;
+    case SYS_MUNMAP:
+      validate_args (esp, 1);
+      munmap (*(int *)(esp + 4));
+      break;
+    case SYS_CHDIR:
+      validate_args (esp, 1);
+      f->eax = chdir (*(const char **) (esp + 4));
+      break;
+    case SYS_MKDIR:
+      validate_args (esp, 1);
+      f->eax = mkdir (*(const char **) (esp + 4));
+      break;
+    case SYS_READDIR:
+      validate_args (esp, 2);
+      f->eax = readdir (*(int *) (esp + 4), *(char **) (esp + 8));
+      break;
+    case SYS_ISDIR:
+      validate_args (esp, 1);
+      f->eax = isdir (*(int *)(esp + 4));
+      break;
+    case SYS_INUMBER:
+      validate_args (esp, 1);
+      f->eax = inumber (*(int *)(esp + 4));
       break;
     default:
       thread_exit();

@@ -10,6 +10,7 @@
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/inode.h"
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
@@ -17,7 +18,10 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/syscall-file.h"
 #include "userprog/process.h"
+#include "vm/frame.h"
+#include "vm/page.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -37,7 +41,7 @@ get_process (pid_t pid)
   return NULL;
 }
 
-/* Clean up a process */
+/* Clean up a process. */
 static void
 clean_process (pid_t pid)
 {
@@ -89,10 +93,19 @@ process_execute (const char *file_name)
   {
     /* setting status to -1 will ensure correct status in case
      * it is terminated by the kernel */
+    struct thread *parent_thread = thread_current();
     process->status = -1;
-    process->parent_pid = thread_current ()->tid;
+    process->parent_pid = parent_thread->tid;
     process->is_waited_on = false;
+
+    if (parent_thread->process && parent_thread->process->dir)
+      process->dir = dir_reopen (parent_thread->process->dir);
+    else
+      process->dir = dir_open_root();
+
     list_init (&process->fd_map);
+    hash_init (&process->mapid_map, mapid_hash, mapid_less, NULL);
+		hash_init (&process->spage_table, page_hash, page_less, NULL); 
     list_push_back (&process_list, &process->elem);
   }
 
@@ -235,6 +248,7 @@ process_exit (void)
     clean_child_processes (p->pid);
     if (p->executable)
       file_close (p->executable);
+    hash_destroy (&p->spage_table, page_destructor);
   }
 
   uint32_t *pd;
@@ -272,6 +286,24 @@ process_activate (void)
      interrupts. */
   tss_update ();
 }
+
+/* Called when a directory is removed. All processes that had dir with
+ * inode open will have its dir set to NULL. */
+void
+process_dir_remove (struct inode *inode)
+{
+  block_sector_t sector = inode_get_sector (inode);
+  struct list_elem *e;
+  for (e = list_begin (&process_list); e != list_end (&process_list);
+        e = list_next (e))
+  {
+    struct process *p = list_entry (e, struct process, elem); 
+    if (p->dir && sector == inode_get_sector (dir_get_inode (p->dir)))
+      p->dir = NULL;
+  }
+  return NULL;
+}
+
 
 /* We load ELF binaries.  The following definitions are taken
    from the ELF specification, [ELF1], more-or-less verbatim.  */
@@ -472,8 +504,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
 /* load() helpers. */
 
-static bool install_page (void *upage, void *kpage, bool writable);
-
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
 static bool
@@ -550,29 +580,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
-      if (kpage == NULL)
-        return false;
-
-      /* Load this page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }
+			lazy_load_segment (upage, file, ofs, page_read_bytes, page_zero_bytes, 
+													writable);		
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
+			ofs += page_read_bytes;
       upage += PGSIZE;
     }
   return true;
@@ -583,37 +597,8 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp) 
 {
-  uint8_t *kpage;
-  bool success = false;
-
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL) 
-    {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE;
-      else
-        palloc_free_page (kpage);
-    }
+  bool success = stack_page_alloc ();
+  if (success)
+    *esp = PHYS_BASE;
   return success;
-}
-
-/* Adds a mapping from user virtual address UPAGE to kernel
-   virtual address KPAGE to the page table.
-   If WRITABLE is true, the user process may modify the page;
-   otherwise, it is read-only.
-   UPAGE must not already be mapped.
-   KPAGE should probably be a page obtained from the user pool
-   with palloc_get_page().
-   Returns true on success, false if UPAGE is already mapped or
-   if memory allocation fails. */
-static bool
-install_page (void *upage, void *kpage, bool writable)
-{
-  struct thread *t = thread_current ();
-
-  /* Verify that there's not already a page at that virtual
-     address, then map our page there. */
-  return (pagedir_get_page (t->pagedir, upage) == NULL
-          && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }

@@ -28,12 +28,15 @@
 #include "userprog/gdt.h"
 #include "userprog/syscall.h"
 #include "userprog/tss.h"
+#include "vm/frame.h"
+#include "vm/swap.h"
 #else
 #include "tests/threads/tests.h"
 #endif
 #ifdef FILESYS
 #include "devices/block.h"
 #include "devices/ide.h"
+#include "filesys/cache.h"
 #include "filesys/filesys.h"
 #include "filesys/fsutil.h"
 #endif
@@ -98,6 +101,8 @@ main (void)
   palloc_init (user_page_limit);
   malloc_init ();
   paging_init ();
+  spage_init ();
+  falloc_init ();
 
   /* Segmentation. */
 #ifdef USERPROG
@@ -124,7 +129,9 @@ main (void)
   /* Initialize file system. */
   ide_init ();
   locate_block_devices ();
+  cache_init ();
   filesys_init (format_filesys);
+  swalloc_init ();
 #endif
 
   printf ("Boot complete.\n");
