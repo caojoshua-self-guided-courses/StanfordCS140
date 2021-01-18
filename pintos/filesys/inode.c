@@ -534,8 +534,8 @@ inode_disk_extend_doubly_indblock_children (block_sector_t doubly_indblock,
   bool new_child = *sector_ofs % INDBLOCK_NUM_CHILDREN == 0;
 
   /* Compute offsets. */
-  unsigned first_indblock = *sector_ofs / (INDBLOCK_NUM_CHILDREN + 1);
-  *sector_ofs = *sector_ofs % (INDBLOCK_NUM_CHILDREN + 1);
+  unsigned first_indblock = *sector_ofs / INDBLOCK_NUM_CHILDREN;
+  *sector_ofs = *sector_ofs % INDBLOCK_NUM_CHILDREN;
 
   /* Read in the doubly indblock to find which indblock to write to. */
   block_sector_t *direct_children_sectors = malloc (BLOCK_SECTOR_SIZE);
