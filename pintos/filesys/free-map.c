@@ -19,34 +19,37 @@ free_map_init (void)
   bitmap_mark (free_map, ROOT_DIR_SECTOR);
 }
 
-/* Allocates CNT consecutive sectors from the free map and stores
-   the first into *SECTORP.
-   Returns true if successful, false if not enough consecutive
-   sectors were available or if the free_map file could not be
-   written. */
+/* Allocates CNT sectors from the free map and stores them into SECTORP.
+   SECTORP should be allocated to hold CNT sectors.
+   Returns true if successful, false if not enough sectors were
+   available or if the free_map file could not be written. */
 bool
 free_map_allocate (size_t cnt, block_sector_t *sectorp)
 {
-  block_sector_t sector = bitmap_scan_and_flip (free_map, 0, cnt, false);
-  if (sector != BITMAP_ERROR
-      && free_map_file != NULL
-      && !bitmap_write (free_map, free_map_file))
-    {
-      bitmap_set_multiple (free_map, sector, cnt, false); 
-      sector = BITMAP_ERROR;
-    }
-  if (sector != BITMAP_ERROR)
+  if (cnt == 0)
+    return true;
+
+  size_t allocated = 0;
+  size_t free_map_size = bitmap_size (free_map);
+  for (size_t i = 0; i < free_map_size; ++i)
   {
-    *sectorp = sector;
-    /* Write all the sectors into sectorp.
-     * TODO: non-consecutive sector allocation. */
-    for (block_sector_t i = 0; i < cnt; ++i)
+    if (!bitmap_test (free_map, i))
     {
-      sectorp[i] = sector + i;
+      sectorp[allocated++] = i;
+      bitmap_mark (free_map, i);
+    }
+    if (allocated == cnt)
+    {
+      if (!free_map_file || bitmap_write (free_map, free_map_file))
+        return true;
+      break;
     }
   }
 
-  return sector != BITMAP_ERROR;
+  /* On failure, free all the sectors allocated. */
+  for (size_t i = 0; i < allocated; ++i)
+    bitmap_reset (free_map, i);
+  return false;
 }
 
 /* Makes CNT sectors starting at SECTOR available for use. */
