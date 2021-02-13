@@ -16,3 +16,50 @@ Inode extensibility was a huge pain in the butt to implement to make it work for
 Going through Stanford CS140 was a better learning experience than 95% of classes I took at UCI. The class involves programming in a real code base and real kernel, neither of which I experienced at UCI. Unfortunately, this class took way longer than I would have liked because 1. I got sidetracked by other projects and started working 2 months into this class. and 2. This class is damn hard. I had no one to get help from, dealt with weird depdency issues that wouldn't have existed on the Stanford school machines, and did a 3-person project by myself.
 
 Overall, my greatest satisfaction is just having a better understanding of how software works. I better understand how my programs are loaded into memory and executed. Many common library functions, such as printing and threading, are less of a black box now. Self-learning this course has been a great experience and I would recommend it anyone wanting to better understand operating systems.
+
+### Final Diff
+```
+ pintos/.gitignore                           |   6 +-
+ pintos/Makefile.build                       |   9 +-
+ pintos/devices/shutdown.c                   |   1 +
+ pintos/devices/timer.c                      |  36 +-
+ pintos/filesys/Make.vars                    |   8 +-
+ pintos/filesys/cache.c                      | 265 +++++++++++++
+ pintos/filesys/cache.h                      |  19 +
+ pintos/filesys/directory.c                  | 102 ++++-
+ pintos/filesys/directory.h                  |  11 +-
+ pintos/filesys/filesys.c                    | 162 +++++++-
+ pintos/filesys/filesys.h                    |   3 +-
+ pintos/filesys/free-map.c                   |  42 ++-
+ pintos/filesys/fsutil.c                     |  20 +-
+ pintos/filesys/fsutil.h                     |   1 +
+ pintos/filesys/inode.c                      | 560 +++++++++++++++++++++++-----
+ pintos/filesys/inode.h                      |   4 +-
+ pintos/lib/user/syscall.c                   |  22 +-
+ pintos/tests/Make.tests                     |   2 +-
+ pintos/tests/filesys/extended/grow-seq-lg.c |   1 +
+ pintos/threads/init.c                       |   7 +
+ pintos/threads/real-arithmetic.c            |  44 +++
+ pintos/threads/real-arithmetic.h            |  13 +
+ pintos/threads/synch.c                      |  48 ++-
+ pintos/threads/synch.h                      |   1 +
+ pintos/threads/thread.c                     | 221 ++++++++++-
+ pintos/threads/thread.h                     |  28 +-
+ pintos/threads/vaddr.h                      |   7 +
+ pintos/userprog/exception.c                 |  32 +-
+ pintos/userprog/process.c                   | 263 ++++++++++---
+ pintos/userprog/process.h                   |  35 ++
+ pintos/userprog/syscall-file.c              | 293 +++++++++++++++
+ pintos/userprog/syscall-file.h              |  48 +++
+ pintos/userprog/syscall.c                   | 474 ++++++++++++++++++++++-
+ pintos/userprog/syscall.h                   |   1 +
+ pintos/utils/Pintos.pm                      |   2 +-
+ pintos/utils/pintos                         |  25 +-
+ pintos/vm/frame.c                           | 163 ++++++++
+ pintos/vm/frame.h                           |  15 +
+ pintos/vm/page.c                            | 317 ++++++++++++++++
+ pintos/vm/page.h                            |  53 +++
+ pintos/vm/swap.c                            | 105 ++++++
+ pintos/vm/swap.h                            |  13 +
+ 42 files changed, 3220 insertions(+), 262 deletions(-)
+```
